@@ -16,9 +16,15 @@ KRAKEN_SEG_MODEL = DATA / "kraken_models" / "blla_kraken7.1.1.mlmodel"
 # are not byte-identical: segmentations made before 2026-11-24 came from the CPU.
 KRAKEN_DEVICE = os.environ.get("MSOCR_KRAKEN_DEVICE") or (
     "mps" if __import__("sys").platform == "darwin" and __import__("platform").machine() == "arm64" else "cpu")
-# Which segmentation the tools read: "seg" (Kraken's, data/<ms>/seg/) unless MSOCR_SEG says otherwise,
-# e.g. MSOCR_SEG=seg_torch for our own PyTorch segmenter (msocr/tseg.py, data/<ms>/seg_torch/).
-SEG = os.environ.get("MSOCR_SEG", "seg")
+# Which segmentation the tools make and read: "seg_torch", our own U-Net (msocr/tseg.py, data/<ms>/seg_torch/), the
+# default since 2026-11-24 (tseg1: baselines 0.974 F1 against Kraken's, the same rows on every linear test page, 3.28 %
+# of characters wrong against Kraken's 3.38 %, 0.13 s a page against 4-10 s; on the 50 reviewed tripāṭha and
+# pañcapāṭha pages 27 split right against 30); "seg", Kraken's (data/<ms>/seg/); or another folder of segmentations in
+# Kraken's format (seg_repaired). MSOCR_SEG chooses. A page whose line images were cut already keeps the segmentation
+# they were cut from (segment.page_seg), unless MSOCR_SEG is set, and a corrected page always keeps it.
+SEG = os.environ.get("MSOCR_SEG", "seg_torch")
+SEG_CHOSEN = "MSOCR_SEG" in os.environ      # set by hand: then it applies to pages cut before too (not corrected ones)
+KRAKEN_SEG = "seg"
 
 def _image_name(num):
     # <pb n="0002_2"/>  ->  085885_00002_2.jpg

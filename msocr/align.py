@@ -22,6 +22,7 @@ import collections
 import json
 import random
 import statistics
+from pathlib import Path
 from xml.sax.saxutils import escape
 
 import numpy as np
@@ -598,10 +599,15 @@ def _page_xml(image_path, size, lines):
     return "\n".join(out)
 
 
-def align(ms_id: str, preview: int = 3):
+def align(ms_id: str, preview: int = 3, seg: str = "seg"):
+    """seg: the segmentation whose lines are paired, Kraken's (seg: pagexml/, train.txt ...) or another, whose set is
+    kept apart (seg_torch: pagexml_seg_torch/, with each page's exact rows as JSON beside its PAGE XML, and
+    train_seg_torch.txt ...), its pages kept in the sets Kraken's set gave them, so that scores stay comparable."""
     ms = MANUSCRIPTS[ms_id]
     d = ms_dir(ms_id)
-    xml_dir, prev_dir = d / "pagexml", d / "preview"
+    seg_name = seg            # (seg is the page's segmentation in the loop below)
+    sfx = "" if seg_name == "seg" else f"_{seg_name}"
+    xml_dir, prev_dir = d / f"pagexml{sfx}", d / f"preview{sfx}"
     xml_dir.mkdir(exist_ok=True)
     prev_dir.mkdir(exist_ok=True)
 
@@ -610,10 +616,10 @@ def align(ms_id: str, preview: int = 3):
         by_image[r["image"]].append(r)
 
     accepted, rejected, fragments_joined, line_heights = [], [], 0, []
-    print(f"[align] {ms_id}: pairing detected lines with transcribed lines")
+    print(f"[align] {ms_id}: pairing detected lines ({seg_name}) with transcribed lines")
     for image in sorted(by_image):
         gt_lines = by_image[image]        # order in the TEI file; its n= numbers have typos
-        seg_path = d / "seg" / (image.rsplit(".", 1)[0] + ".json")
+        seg_path = d / seg_name / (image.rsplit(".", 1)[0] + ".json")
         if not seg_path.exists():
             rejected.append((image, "not segmented yet"))
             continue
@@ -640,6 +646,9 @@ def align(ms_id: str, preview: int = 3):
         xml_path = xml_dir / (image.rsplit(".", 1)[0] + ".xml")
         xml_path.write_text(_page_xml(img_path, size, [(b, p, g["text"]) for (b, p), g in zip(merged, gt_lines)]),
                             encoding="utf-8")
+        if sfx:     # the rows as predict cuts them (PAGE XML keeps whole pixels only)
+            xml_path.with_suffix(".json").write_text(json.dumps([{"baseline": [list(map(float, q)) for q in b], "outline": [list(map(float, q)) for q in p], "text": g["text"]}
+                                                                 for (b, p), g in zip(merged, gt_lines)], ensure_ascii=False), encoding="utf-8")
         accepted.append(xml_path)
 
         if len(accepted) <= preview:      # picture of what the recogniser will be shown
@@ -664,13 +673,17 @@ def align(ms_id: str, preview: int = 3):
               f"min {min(line_heights)}, max {max(line_heights)}")
     print(f"  preview images : {prev_dir}")
 
-    if all((d / f"{n}.txt").exists() for n in ("train", "val", "test")):
-        # keep every page in the set it was first given, so scores stay comparable between runs
-        old = {n: set((d / f"{n}.txt").read_text().split()) for n in ("train", "val", "test")}
-        ok = {str(p) for p in accepted}
-        test, val = sorted(old["test"] & ok), sorted(old["val"] & ok)
-        train = sorted(ok - old["test"] - old["val"])
-        print("  split: kept the existing assignment of pages (newly rejected pages removed)")
+    first = sfx if all((d / f"{n}{sfx}.txt").exists() for n in ("train", "val", "test")) else ""
+    if all((d / f"{n}{first}.txt").exists() for n in ("train", "val", "test")):
+        # keep every page in the set it was first given (for another segmentation, the set Kraken's gave it), so scores
+        # stay comparable between runs
+        stem = lambda p: Path(p).stem
+        old = {n: {stem(p) for p in (d / f"{n}{first}.txt").read_text().split()} for n in ("train", "val", "test")}
+        ok = {stem(p): str(p) for p in accepted}
+        test = sorted(ok[s] for s in old["test"] if s in ok)
+        val = sorted(ok[s] for s in old["val"] if s in ok)
+        train = sorted(p for s, p in ok.items() if s not in old["test"] and s not in old["val"])
+        print("  split: kept the existing assignment of pages" + (" (Kraken's set's)" if sfx and not first else "") + " (newly rejected pages removed)")
     else:
         rng = random.Random(SEED)
         pages = sorted(str(p) for p in accepted)
@@ -680,7 +693,7 @@ def align(ms_id: str, preview: int = 3):
         val = sorted(pages[TEST_PAGES:TEST_PAGES + n_val])
         train = sorted(pages[TEST_PAGES + n_val:])
     for name, part in (("train", train), ("val", val), ("test", test)):
-        (d / f"{name}.txt").write_text("\n".join(str(p) for p in part) + "\n")
+        (d / f"{name}{sfx}.txt").write_text("\n".join(str(p) for p in part) + "\n")
     print(f"  split (whole pages) : train {len(train)}, validation {len(val)}, test {len(test)}")
     print("    train      = pages the model learns from")
     print("    validation = pages scored after every pass to track progress and pick the best model")
@@ -690,4 +703,6 @@ def align(ms_id: str, preview: int = 3):
 
 if __name__ == "__main__":
     import sys
-    align(sys.argv[1])
+    args = [a for a in sys.argv[1:] if not a.startswith("--seg=")]
+    seg = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--seg=")), "seg")
+    align(args[0], seg=seg)

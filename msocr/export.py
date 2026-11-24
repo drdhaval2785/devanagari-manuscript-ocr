@@ -247,7 +247,10 @@ def machine(ms_id, model, out=None):
     net, chars, ck = load_model(model)
     label = model_label(model, ck)
     images = sorted(p.name for p in MANUSCRIPTS[ms_id]["images"].glob("*.jpg"))
-    ensure_segmented(ms_id, images)
+    from .segment import page_seg, reading_from
+    segs = {i: page_seg(ms_id, i.rsplit(".", 1)[0]) for i in images}
+    for seg in sorted(set(segs.values())):
+        ensure_segmented(ms_id, [i for i in images if segs[i] == seg], seg)
     print(f"[export] {ms_id}: reading {len(images)} pages with {label}")
     pages, warned, t = [], [], time.time()
     for k, image in enumerate(images, 1):
@@ -255,7 +258,8 @@ def machine(ms_id, model, out=None):
         if stem in not_text(ms_id):
             pages.append((page_id(stem), None, {}))
             continue
-        boxes, note, warn = read_page(ms_id, image, net, chars)
+        with reading_from(segs[image]):
+            boxes, note, warn = read_page(ms_id, image, net, chars)
         pages.append((page_id(stem), "machine" if boxes else None, {b: [l["text"] for l in ls] for b, ls in boxes.items()}))
         if warn and boxes:
             warned.append(stem)

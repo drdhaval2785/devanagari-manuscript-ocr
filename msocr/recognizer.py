@@ -22,6 +22,11 @@ Words used in the report
 
 Files written to data/<ms>/models/<run>/ : train.log, history.csv, best.pt, last.pt
 
+Which lines: --seg seg (the default) trains on the lines align paired from Kraken's segmentation, cut by Kraken's
+extract_polygons (lines/<split>/, as run1-run3 were); --seg seg_torch on those it paired from our U-Net's, cut by our
+own cutter exactly as predict and Manuscribe cut them (lines_seg_torch/<split>/, from align --seg=seg_torch), so that
+the recogniser learns from the line images it will read.
+
 Three ways to train
   train     LDII_85885 --run run1      a blank model on one transcribed manuscript (stages 1 and 2)
   finetune  LDII_19634 --run ft1       a trained model adapted to one new hand from its corrected pages
@@ -58,8 +63,14 @@ PIECES_MAX_PASSES = 25      # ... or after this many passes regardless
 
 
 # ---------------------------------------------------------------- data
-def build_cache(ms_id, verbose=True):
+def lines_dir(ms_id, seg="seg"):
+    return ms_dir(ms_id) / ("lines" if seg == "seg" else f"lines_{seg}")
+
+
+def build_cache(ms_id, verbose=True, seg="seg"):
     """Cut every paired line out of its page once and store it, so training starts fast."""
+    if seg != "seg":
+        return _build_cache_own(ms_id, seg, verbose)
     from kraken.lib.segmentation import extract_polygons
     from kraken.lib.xml import XMLPage
     warnings.filterwarnings("ignore")
@@ -86,6 +97,36 @@ def build_cache(ms_id, verbose=True):
             print(f"[lines] {split}: cut {n} line images from {len(pages)} pages", flush=True)
 
 
+def _build_cache_own(ms_id, seg, verbose=True):
+    """The lines align paired from another segmentation (pagexml_<seg>/<page>.json: the rows as predict makes them),
+    cut by our own cutter (linecut), as predict and Manuscribe cut them."""
+    import json
+    from .config import MANUSCRIPTS
+    from .linecut import band_of, cut_line
+    d = ms_dir(ms_id)
+    for split in ("train", "val", "test"):
+        out = lines_dir(ms_id, seg) / split
+        pages = (d / f"{split}_{seg}.txt").read_text().split()
+        if out.exists() and len(list(out.glob("*.png"))) > 0:
+            if verbose:
+                print(f"[lines] {split}: already cut ({len(list(out.glob('*.png')))} line images, {seg}, own cutter)")
+            continue
+        out.mkdir(parents=True, exist_ok=True)
+        n = 0
+        for xml in pages:
+            stem = Path(xml).stem
+            rows = json.loads(Path(xml).with_suffix(".json").read_text(encoding="utf-8"))
+            page = np.asarray(Image.open(MANUSCRIPTS[ms_id]["images"] / f"{stem}.jpg").convert("RGB"))
+            for li, r in enumerate(rows, 1):
+                above, below = band_of(r["baseline"], r["outline"])
+                p = out / f"{stem}_{li:02d}.png"
+                Image.fromarray(cut_line(page, r["baseline"], above, below)).save(p)
+                p.with_suffix(".gt.txt").write_text(r["text"], encoding="utf-8")
+                n += 1
+        if verbose:
+            print(f"[lines] {split}: cut {n} line images from {len(pages)} pages ({seg}, own cutter)", flush=True)
+
+
 def to_tensor(im):
     im = im.convert("L")
     w = max(STRIDE * 2, round(im.size[0] * HEIGHT / im.size[1]))
@@ -93,8 +134,8 @@ def to_tensor(im):
     return torch.from_numpy(1.0 - np.asarray(im, dtype=np.float32) / 255.0)
 
 
-def load_split(ms_id, split, limit=None):
-    files = sorted((ms_dir(ms_id) / "lines" / split).glob("*.png"))
+def load_split(ms_id, split, limit=None, seg="seg"):
+    files = sorted((lines_dir(ms_id, seg) / split).glob("*.png"))
     if limit:
         files = files[:limit]
     return [(to_tensor(Image.open(f)), f.with_suffix(".gt.txt").read_text(encoding="utf-8"), f.stem) for f in files]
@@ -220,7 +261,7 @@ class _Tee:
 
 
 def train(ms_id, run="run1", max_passes=80, lag=8, lrate=1e-3, batch_pieces=16, batch_lines=8,
-          threads=6, limit=None, seed=0, augment_on=True, min_gain=0.1):
+          threads=6, limit=None, seed=0, augment_on=True, min_gain=0.1, seg="seg"):
     d = ms_dir(ms_id)
     run_dir = d / "models" / run
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -230,9 +271,10 @@ def train(ms_id, run="run1", max_passes=80, lag=8, lrate=1e-3, batch_pieces=16, 
     rng = random.Random(seed)
 
     print(f"\n[train] run '{run}' on {ms_id}   ({time.strftime('%Y-%m-%d %H:%M')})")
-    build_cache(ms_id)
+    build_cache(ms_id, seg=seg)
+    print(f"  lines            : {'from Kraken segmentation, cut by Kraken (lines/)' if seg == 'seg' else f'from {seg}, cut by our own cutter as predict and Manuscribe cut them (lines_{seg}/)'}")
     t = time.time()
-    train_lines, val_lines = load_split(ms_id, "train", limit), load_split(ms_id, "val", limit and max(40, limit // 8))
+    train_lines, val_lines = load_split(ms_id, "train", limit, seg), load_split(ms_id, "val", limit and max(40, limit // 8), seg)
     chars = sorted(set("".join(s[1] for s in train_lines)))
     known = set(chars)
     c2i = {c: i + 1 for i, c in enumerate(chars)}
@@ -288,8 +330,8 @@ def train(ms_id, run="run1", max_passes=80, lag=8, lrate=1e-3, batch_pieces=16, 
             flat += 1
         if improved:
             best, best_ep = cer, ep
-            torch.save({"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": cer}, run_dir / "best.pt")
-        torch.save({"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": cer}, run_dir / "last.pt")
+            torch.save({"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": cer, "lines": seg}, run_dir / "best.pt")
+        torch.save({"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": cer, "lines": seg}, run_dir / "last.pt")
 
         note = ""
         if stage == "pieces" and (cer < PIECES_UNTIL_CER or ep >= PIECES_MAX_PASSES):
@@ -698,14 +740,15 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
     return history
 
 
-def test(ms_id, run="run1", show=5, model=None):
-    """Final score on the held-out test pages, which training never touched. `model` scores another model's file."""
+def test(ms_id, run="run1", show=5, model=None, seg="seg"):
+    """Final score on the held-out test pages, which training never touched. `model` scores another model's file; seg
+    the test lines of which segmentation (lines/ or lines_<seg>/)."""
     net, chars, ck = load_model(Path(model) if model else ms_dir(ms_id) / "models" / run / "best.pt")
-    lines = load_split(ms_id, "test")
+    lines = load_split(ms_id, "test", seg=seg)
     cer, pairs = evaluate(net, lines, chars)
     per_line = sorted(100 * Levenshtein.distance(p, t) / len(t) for p, t, _ in pairs)
     print(f"[test] {ms_id} {'model ' + str(model) if model else 'run ' + repr(run)} (from pass {ck['pass']}, validation CER {ck['val_cer']:.2f}%)")
-    print(f"  test lines : {len(lines)} from {len({s[2].rsplit(chr(95), 1)[0] for s in lines})} held-out pages")
+    print(f"  test lines : {len(lines)} from {len({s[2].rsplit(chr(95), 1)[0] for s in lines})} held-out pages ({seg})")
     print(f"  test CER   : {cer:.2f}%")
     print(f"  per line   : median {per_line[len(per_line) // 2]:.1f}%, best {per_line[0]:.1f}%, worst {per_line[-1]:.1f}%")
     print(f"  commonest mistakes: {confusions(pairs, 12)}")
@@ -732,6 +775,7 @@ if __name__ == "__main__":
     ap.add_argument("--limit", type=int, help="use only the first N training lines (quick trials)")
     ap.add_argument("--no-augment", action="store_true")
     ap.add_argument("--no-contributions", action="store_true", help="pool: leave out the lines contributed from Manuscribe")
+    ap.add_argument("--seg", default="seg", help="train/test: lines from Kraken's segmentation (seg) or the U-Net's (seg_torch)")
     a = ap.parse_args()
     if a.command == "pool":
         pool(a.run, a.base, a.passes, per_pass=a.per_pass, holdout=a.holdout, ms_ids=a.ms_id or None, exclude=a.exclude,
@@ -740,8 +784,8 @@ if __name__ == "__main__":
     if len(a.ms_id) != 1:
         ap.error(f"{a.command} takes exactly one manuscript")
     if a.command == "train":
-        train(a.ms_id[0], a.run, a.max_passes, a.lag, a.lrate, threads=a.threads, limit=a.limit, augment_on=not a.no_augment)
+        train(a.ms_id[0], a.run, a.max_passes, a.lag, a.lrate, threads=a.threads, limit=a.limit, augment_on=not a.no_augment, seg=a.seg)
     elif a.command == "finetune":
         finetune(a.ms_id[0], a.base, a.run, a.passes, holdout=a.holdout, threads=a.threads)
     else:
-        test(a.ms_id[0], a.run, model=a.model)
+        test(a.ms_id[0], a.run, model=a.model, seg=a.seg)

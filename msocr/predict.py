@@ -1,7 +1,8 @@
 """Read pages that have no transcription, producing a draft to correct.
 
 For each page:
-  1. Kraken finds the text lines (skipped if already done)
+  1. the text lines are found (skipped if already done): by our U-Net, the default, or by Kraken (msocr.segment; a
+     page cut before keeps the segmentation it was cut from, see segment.page_seg)
   2. the main text rows are picked out, exactly as in align.py
   3. each row is cut out and read by the recogniser
   4. the result is written under data/<ms>/:
@@ -15,7 +16,8 @@ For each page:
        lines/pred/            the line images
 
 Corrected pages go in data/<ms>/corrected/<page>.txt (same name, same number of lines).
-`finetune` trains on whatever is in that folder.
+`finetune` trains on whatever is in that folder. A page in corrected/ is never read again: its text is paired with its
+line images, which must stay as they were cut.
 
 Confidence = how sure the model was, averaged over the characters of a line (0-100).
 Low-confidence lines are tinted in the review page; check those first.
@@ -38,7 +40,7 @@ from .align import _merge, _page_xml, fill_edge_rows, find_rows, uneven
 from .blocks import blocks_for_page, layout_of
 from .config import DATA, MANUSCRIPTS, SEG, ms_dir, not_text
 from .recognizer import load_model, to_tensor
-from .segment import ensure_segmented
+from .segment import cut_from, ensure_segmented, page_seg, pin, reading_from
 
 DEFAULT_MODEL = DATA / "LDII_85885" / "models" / "run3" / "best.pt"
 
@@ -205,13 +207,27 @@ def predict(ms_id, images, model=DEFAULT_MODEL, verbose=True, write_to_correct=T
         images = [i for i in images if i.rsplit(".", 1)[0] not in skip]
     for sub in ("drafts", "to_correct", "review", "corrected", "lines/pred"):
         (d / sub).mkdir(parents=True, exist_ok=True)
-    ensure_segmented(ms_id, images)
+    done = [i for i in images if (d / "corrected" / f"{i.rsplit('.', 1)[0]}.txt").exists()]
+    if done:
+        print(f"[predict] {ms_id}: {len(done)} corrected page(s) not read again (their text is paired with their line images)")
+        images = [i for i in images if i not in done]
+    segs = {i: page_seg(ms_id, i.rsplit(".", 1)[0]) for i in images}
+    for seg in sorted(set(segs.values())):
+        ensure_segmented(ms_id, [i for i in images if segs[i] == seg], seg)
     net, chars, ck = load_model(model)
-    print(f"[predict] {ms_id}: {len(images)} pages with model {model_label(model, ck)} on its own manuscript")
+    print(f"[predict] {ms_id}: {len(images)} pages with model {model_label(model, ck)} on its own manuscript; lines from "
+          + ", ".join(f"{s} on {sum(1 for v in segs.values() if v == s)}" for s in sorted(set(segs.values()))))
     summary = []
     for image in images:
         stem = image.rsplit(".", 1)[0]
-        boxes, note, warn = read_page(ms_id, image, net, chars, d / "lines" / "pred")
+        seg = segs[image]
+        if cut_from(ms_id, stem) not in (None, seg):            # cut again from another segmentation: no old image may stay
+            for f in (d / "lines" / "pred").glob(f"{stem}_*.png"):
+                f.unlink()
+        with reading_from(seg):
+            boxes, note, warn = read_page(ms_id, image, net, chars, d / "lines" / "pred")
+        if boxes:
+            pin(ms_id, stem, seg)
         if not boxes:
             print(f"  {stem}: {warn}")
             continue

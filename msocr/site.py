@@ -111,6 +111,10 @@ def _cards(manifest):
     seg = {"run": run, "log": head.strip(), "manuscripts": by_ms,
            "note": "the training split as it stands at this pack's build (tseg.page_list); the run's own log gives its counts",
            "page_height": heights}
+    seg_ck = ROOT / seg_src
+    if seg_ck.exists():
+        import torch
+        seg["contributions"] = torch.load(seg_ck, map_location="cpu").get("contributions") or []
     rec = {"lineage": _recogniser_lineage(manifest["models"]["recogniser"]["source"])}
     got = {}
     for step in rec["lineage"]:
@@ -123,6 +127,9 @@ def _cards(manifest):
         c["licence"] = LICENCE
         c["consent"] = ("the developer's own manuscripts only; no contributed data" if k != "spacer"
                         else "openly licensed texts; no manuscript images")
+    if seg.get("contributions"):
+        seg["consent"] = (f"the developer's own manuscripts, and folio sides contributed from Manuscribe with their editors' consent: "
+                          f"{sum(c['sides'] for c in seg['contributions'])} sides of {len({c['manuscript'] for c in seg['contributions']})} manuscript(s)")
     if rec["contributions"]:
         ms = sorted({c["manuscript"] for c in rec["contributions"]})
         rel = sorted({c.get("release") or "-" for c in rec["contributions"]})
@@ -152,16 +159,25 @@ def _card_md(m):
     lines += ["", "It reads the hands it learned from well and other hands poorly: a model pooled over many hands is "
               "to replace it.", "", "## Word spacer", "", f"Run `{sp['run']}`, trained on {sp['texts']}. Threshold "
               f"{m['models']['spacer']['threshold']}.", "", "## Consent", ""]
+    if seg.get("contributions"):
+        lines += ["The segmenter learned also from folio sides contributed from Manuscribe, each manuscript's given by its editor "
+                  "with consent, and used only where its lines as the segmenter found them bore out its editor's line counts "
+                  "in every block (msocr.sidequality):", ""]
+        lines += [f"- {c['manuscript']}: {c['sides']} sides (package `{c['id']}`)" for c in sorted(seg["contributions"], key=lambda c: (c["manuscript"], c["id"]))]
+        lines += [""]
     if rec.get("contributions"):
-        lines += ["The segmenter learned from the developer's own manuscripts only. The recogniser learned also from lines "
+        lines += [("The segmenter learned from the developer's own manuscripts only. " if not seg.get("contributions") else "")
+                  + "The recogniser learned also from lines "
                   "contributed from Manuscribe, each manuscript's given by its editor with consent to train the models, and "
                   "checked before training (msocr.linequality):", ""]
         lines += [f"- {c['manuscript']}: {c.get('trained', c.get('lines'))} lines (package `{c['id']}`, data release "
                   f"`{c.get('release') or '-'}`)" for c in sorted(rec["contributions"], key=lambda c: (c["manuscript"], c["id"]))]
         lines += ["", "A contribution withdrawn later is left out of models trained after its withdrawal; this model, trained "
                   "while its consent stood, remains as it is.", ""]
-    else:
+    elif not seg.get("contributions"):
         lines += ["No contributed data: the segmenter and the recogniser learned from the developer's own manuscripts only.", ""]
+    lines += [f"Language and script: {m.get('script', 'sa-Deva')} only. Lines and pages of another language or script are never "
+              "mixed into these models' training.", ""]
     return "\n".join(lines)
 
 
@@ -189,6 +205,8 @@ def add_pack(pack_dir, site):
         m["models"][k]["card"] = cards[k]
     m["page_height"] = cards["segmenter"]["page_height"]
     m["software"] = {NAME: __version__, "repository": REPOSITORY}
+    from .contributions import MODELS_SCRIPT
+    m["script"] = MODELS_SCRIPT          # the language and script its models read (BCP 47): Manuscribe asks before reading another's
     (out / "MODEL_CARD.md").write_text(_card_md(m), encoding="utf-8")
     (out / "manifest.json").write_text(json.dumps(m, ensure_ascii=False, indent=1), encoding="utf-8")
     return m
@@ -242,8 +260,9 @@ def write_index(site):
 
 def write_contribute(site, inbox, email):
     """contribute.json: where Manuscribe sends contributed lines, and the public key it seals them to"""
-    from .contributions import APPROVED
-    c = {"schema": 1, "inbox": inbox, "email": email, "wordings": sorted(APPROVED), "key": seal.public_info(seal.load_public())}
+    from .contributions import APPROVED, MODELS_SCRIPT, SIDES
+    c = {"schema": 1, "inbox": inbox, "email": email, "wordings": sorted(APPROVED), "sides": sorted(SIDES), "script": MODELS_SCRIPT,
+         "key": seal.public_info(seal.load_public())}
     (site / "contribute.json").write_text(json.dumps(c, indent=1), encoding="utf-8")
     return c
 

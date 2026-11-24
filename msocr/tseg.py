@@ -48,8 +48,9 @@ Only pages Kraken got right are used, in all three sets
         far the two segmentations agree (baselines), the rows the row finder makes of each, and the time
         per page; writes data/tseg/compare_<ms>.txt
 
-The rest of the tools read Kraken's segmentation unless MSOCR_SEG=seg_torch is set (config.SEG),
-e.g. MSOCR_SEG=seg_torch .venv/bin/python -m msocr.show AKGM_0025383 0069_1.
+Since 2026-11-24 the rest of the tools make and read this segmentation by default (config.SEG; a page cut before
+keeps Kraken's, segment.page_seg); MSOCR_SEG=seg brings Kraken's back, e.g.
+MSOCR_SEG=seg .venv/bin/python -m msocr.show AKGM_0025383 0069_1. Its training still learns from Kraken's (reviewed).
 """
 import argparse
 import csv
@@ -184,9 +185,23 @@ def flagged(ms):
     return out
 
 
-def page_list(quality=True):
+def contributed_pages(script=None):
+    """Folio sides contributed from Manuscribe that the segmenter may learn from (msocr.contributions.allowed_sides: the
+    consent of a wording that gives sides, the package checked, and the U-Net's rows on the side borne out by its
+    editor's line counts in every block), of the language and script of these models only -> {"train", "val"} of
+    (contributed: <manuscript>, <package>/<folio>, image path, target json path); one in VAL_EVERY by hash to val."""
+    from . import contributions
+    out = {"train": [], "val": []}
+    for x in contributions.allowed_sides(script or contributions.MODELS_SCRIPT):
+        item = (f"contributed: {x['manuscript']}", f"{x['id']}/{x['folio']}", x["image"], x["target"])
+        out["val" if _hash(f"contributed/{x['id']}/{x['folio']}") % VAL_EVERY == 0 else "train"].append(item)
+    return out
+
+
+def page_list(quality=True, contributions=False):
     """-> {"train": [...], "val": [...], "test": [...], "flagged": [...]} of (ms, stem, image path, Kraken json path);
-    with quality, the pages rowcheck flags go to "flagged" instead of a set (see the module's notes)."""
+    with quality, the pages rowcheck flags go to "flagged" instead of a set (see the module's notes); with
+    contributions, the contributed sides of these models' language and script join train and val (contributed_pages)."""
     from .config import not_text
     test_stems = _test_pages()
     out = {"train": [], "val": [], "test": [], "flagged": [], "not_text": []}
@@ -219,6 +234,10 @@ def page_list(quality=True):
                 out["val"].append(item)
             else:
                 out["train"].append(item)
+    if contributions:
+        c = contributed_pages()
+        out["train"] += c["train"]
+        out["val"] += c["val"]
     return out
 
 
@@ -521,12 +540,18 @@ def agreement(pred_lines, ref_lines, tol):
 
 # ---------------------------------------------------------------- training
 
-def train(run, epochs=24, batch=8, lr=1e-3, workers=4):
+def train(run, epochs=24, batch=8, lr=1e-3, workers=4, contributions=True):
     torch.manual_seed(SEED)
     random.seed(SEED)
     dev = device()
     ensure_rowchecks()
-    pages = page_list()
+    pages = page_list(contributions=contributions)
+    contributed = {}
+    for ms, stem, img, js in pages["train"] + pages["val"]:
+        if ms.startswith("contributed: "):
+            cid = stem.split("/")[0]
+            c = contributed.setdefault(cid, {"id": cid, "manuscript": ms[len("contributed: "):], "sides": 0})
+            c["sides"] += 1
     (DATA / "tseg").mkdir(exist_ok=True)
     with open(DATA / "tseg" / "flagged_pages.tsv", "w", encoding="utf-8") as f:
         f.write("manuscript\timage\twhy left out\n")
@@ -547,6 +572,9 @@ def train(run, epochs=24, batch=8, lr=1e-3, workers=4):
     say(f"[tseg] run {run}: train {len(pages['train'])} pages, val {len(pages['val'])}, test {len(pages['test'])}; "
         f"{len(pages['flagged'])} pages left out because Kraken's segmentation of them is doubtful "
         f"(data/tseg/flagged_pages.tsv); device {dev}")
+    if contributions:
+        say(f"  contributed sides: {sum(c['sides'] for c in contributed.values())} from {len(contributed)} package(s) "
+            f"(their editors' line counts borne out; python -m msocr.contributions quality)")
     dl = torch.utils.data.DataLoader(Pages(pages["train"]), batch_size=batch, shuffle=True, num_workers=workers,
                                      drop_last=True, persistent_workers=workers > 0)
     net = UNet().to(dev)
@@ -584,7 +612,8 @@ def train(run, epochs=24, batch=8, lr=1e-3, workers=4):
         mark = ""
         if f1 > best:
             best = f1
-            torch.save({"model": net.state_dict(), "arch": {"out": 3}, "epoch": ep, "val_baseline_f1": f1, "img_h": IMG_H}, d / "best.pt")
+            torch.save({"model": net.state_dict(), "arch": {"out": 3}, "epoch": ep, "val_baseline_f1": f1, "img_h": IMG_H,
+                        "contributions": list(contributed.values())}, d / "best.pt")
             mark = "  (best)"
         say(f"  pass {ep:2d}/{epochs}  loss {statistics.mean(losses):.4f}  val baseline agreement with Kraken: "
             f"P {p:.3f} R {r:.3f} F1 {f1:.3f}  {(time.time() - t0) / 60:5.1f} min{mark}")
@@ -672,6 +701,7 @@ if __name__ == "__main__":
     a.add_argument("--epochs", type=int, default=24)
     a.add_argument("--batch", type=int, default=8)
     a.add_argument("--workers", type=int, default=4)
+    a.add_argument("--no-contributions", action="store_true", help="leave out the folio sides contributed from Manuscribe")
     a = sub.add_parser("segment")
     a.add_argument("ms_id")
     a.add_argument("--model")
@@ -689,7 +719,7 @@ if __name__ == "__main__":
                   "       and the flagged pages first (data/<ms>/rowcheck.txt, msocr.show <ms> --warned), then run\n"
                   "       python -m msocr.tseg train --run tseg1 --reviewed", flush=True)
             sys.exit(0)
-        train(args.run, args.epochs, args.batch, workers=args.workers)
+        train(args.run, args.epochs, args.batch, workers=args.workers, contributions=not args.no_contributions)
     elif args.cmd == "segment":
         imgs = None
         if args.pages:

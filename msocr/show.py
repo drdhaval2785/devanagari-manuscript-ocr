@@ -33,6 +33,7 @@ from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 
 from .align import _merge
+from .segment import page_seg, reading_from
 from .blocks import COLOR, EXPECTED, blocks_for_page, layout_of, page_blocks
 from .config import MANUSCRIPTS, SEG, ms_dir
 from .predict import page_rows
@@ -60,14 +61,17 @@ def image_of(ms_id, page):
     image = MANUSCRIPTS[ms_id]["image_name"](f"{int(m.group(1)):04d}_{m.group(2)}")
     if not (MANUSCRIPTS[ms_id]["images"] / image).exists():
         raise SystemExit(f"{ms_id} has no page image {image}")
-    if not (ms_dir(ms_id) / SEG / (image.rsplit(".", 1)[0] + ".json")).exists():
+    stem = image.rsplit(".", 1)[0]
+    if not (ms_dir(ms_id) / page_seg(ms_id, stem) / (stem + ".json")).exists():
         raise SystemExit(f"{image} is not segmented yet: run  python -m msocr.segment {ms_id}  first")
     return image
 
 
 def all_pages(ms_id):
+    """the page images segmented as each is to be read (segment.page_seg)"""
     ms = MANUSCRIPTS[ms_id]
-    return [s.stem + ".jpg" for s in sorted((ms_dir(ms_id) / SEG).glob("*.json")) if (ms["images"] / (s.stem + ".jpg")).exists()]
+    images = sorted(p.name for p in ms["images"].glob("*.jpg"))
+    return [i for i in images if (ms_dir(ms_id) / page_seg(ms_id, i.rsplit(".", 1)[0]) / (i.rsplit(".", 1)[0] + ".json")).exists()]
 
 
 def _dashed(dr, pts, fill, width, dash=9):
@@ -286,7 +290,8 @@ def show(ms_id, pages=None, lines=False, pdf=True, warned=False, verbose=True):
         warnings.simplefilter("ignore")
         for k, image in enumerate(images, 1):
             stem = image.rsplit(".", 1)[0]
-            pic, warn = (draw_lines if lines else draw_page)(ms_id, image)
+            with reading_from(page_seg(ms_id, stem)):           # the lines the page is read from
+                pic, warn = (draw_lines if lines else draw_page)(ms_id, image)
             if warned and not warn:
                 continue
             path = out / (f"{stem}_lines.jpg" if lines else f"{stem}.jpg")

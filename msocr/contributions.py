@@ -1,5 +1,9 @@
-"""Contributed lines: the packages Manuscribe makes of a manuscript's corrected lines ("Contribute corrected lines", in
-the Manuscript tab, once its editor has said yes), registered here before anything may be trained on them.
+"""Contributed lines and folio sides: the packages Manuscribe makes of a manuscript's corrected lines and of its folio
+sides whose drawn blocks each hold as many lines of text as their editor gave them ("Contribute corrected lines", in the
+Manuscript tab, once its editor has said yes; sides only on a consent wording that gives them, SIDES), registered here
+before anything may be trained on them. Every package states the manuscript's language and script (a tag as sa-Deva),
+and everything is kept apart by it: the models here (MODELS_SCRIPT) learn from their own language and script only, and
+another's contributions are kept for a model of their own and touch nothing here.
 
 They come by GitHub: Manuscribe seals the lines to the maintainer's key (msocr.seal) and the contributor attaches the
 file to an issue in the inbox repository (manuscribe-contributions), whose workflow checks the package, keeps it as an
@@ -16,10 +20,12 @@ maintainer (the draft releases are seen by no one else).
     .venv/bin/python -m msocr.contributions withdraw <id> [--why "..."]
 
 -> data/contributions/register.tsv     a row per package: id, manuscript (the name the editor gave for the model cards),
-                                       lines, the consent's wording and date, when it was added, its state, the issue
-                                       and GitHub account it came from
-   data/contributions/<id>/            the lines as opened: contribution.json, lines/*.png and *.txt, and quality.json:
-                                       each line's checks, the judge's reading, and the package's verdict
+                                       its language and script, lines, sides, the consent's wording and date, when it
+                                       was added, its state, the issue and GitHub account it came from, what is usable
+   data/contributions/<id>/            as opened: contribution.json, lines/*.png and *.txt, sides/*.jpg and *.json (the
+                                       blocks drawn and their line counts), and quality.json: each line's checks and the
+                                       judge's reading, each side's counts, the package's verdict; sides/*.seg.json, the
+                                       segmenter's target for each side its editor's counts bore out
 A package is taken only if its consent record says yes, confirms the right to share the images, is not withdrawn, and
 was given on a wording approved here (APPROVED; --accept-wording takes another for a trial, and the row says so). A
 sealed package (format version 2, as Manuscribe makes them since 0.11.0) is opened with the private key and must be
@@ -29,14 +35,18 @@ withdrawn, so that the next model's card can say what it no longer learns from; 
 Before training may use a package, its lines are checked (msocr.linequality: the image, the text, the two against
 each other, copies, and a recogniser's reading of the image against the text): the lines that fail are left out, and a
 package with too many failures, or whose texts the judge's reading does not bear out, is quarantined whole until the
-maintainer accepts it (`accept`, after looking at its lines in data/contributions/<id>/).
+maintainer accepts it (`accept`, after looking at its lines in data/contributions/<id>/). Its folio sides are checked
+too (msocr.sidequality): the image and the blocks, and the U-Net's rows in every block against the count its editor
+gave; a side whose counts are borne out gets its target, the others are kept and not used.
 
-    allowed() -> [{manuscript, png, text, id, folio, release}]    the lines training may use: registered, approved, not
-                 withdrawn, of a package checked ok or accepted, each line usable; text as the recogniser learns it
+    allowed(script) -> [{manuscript, png, text, id, folio, release}]    the lines a recogniser of `script` may learn
+                 from: registered, approved, not withdrawn, of that language and script, of a package checked ok or
+                 accepted, each line usable; text as the recogniser learns it
+    allowed_sides(script) -> [{manuscript, image, target, id, folio, release}]    the sides a segmenter may learn from
 
 `recognizer pool` trains on allowed() alongside the developer's own manuscripts (each contributed manuscript a source of
-its own, its last folio sides held out for scoring), and the model it saves lists the packages it learned from, which
-the model card names with the inbox's data release they were synced from.
+its own, its last folio sides held out for scoring), and `tseg train` on allowed_sides() beside Kraken's reviewed pages;
+the models they save list the packages they learned from, which the model cards name.
 """
 import argparse
 import datetime
@@ -55,8 +65,12 @@ from .config import DATA
 
 ROOT = DATA / "contributions"
 REGISTER = ROOT / "register.tsv"
-FIELDS = ["id", "manuscript", "lines", "wording", "consent_date", "added", "state", "note", "issue", "contributor", "release", "quality", "usable"]
-APPROVED = {"1"}        # consent wordings approved by the maintainer (Manuscribe's recogview.js, CONSENT.version)
+FIELDS = ["id", "manuscript", "script", "lines", "sides", "wording", "consent_date", "added", "state", "note", "issue", "contributor",
+          "release", "quality", "usable", "usable_sides"]
+APPROVED = {"1", "2"}   # consent wordings approved by the maintainer (Manuscribe's recogview.js, CONSENT.version)
+SIDES = {"2"}           # ... of which those that give whole folio sides, not lines only
+TAG = __import__("re").compile(r"^[a-z]{2,3}-[A-Z][a-z]{3}$")       # a manuscript's language and script, as sa-Deva
+MODELS_SCRIPT = "sa-Deva"   # the language and script of the models trained here: only their data trains them
 INBOX = "drdhaval2785/manuscribe-contributions"
 
 
@@ -88,7 +102,14 @@ def check(about, accept=()):
         why.append("its consent was withdrawn")
     if c.get("wording") not in APPROVED | set(accept):
         why.append(f"consent given on wording {c.get('wording')!r}, which is not approved here")
-    if not (about.get("lines") if about.get("version") == 1 else about.get("count")):
+    if about.get("sealed"):
+        if not TAG.match(str((about.get("manuscript") or {}).get("script", ""))):
+            why.append("no language and script stated for the manuscript (as sa-Deva)")
+        if about.get("sides") and c.get("wording") not in SIDES:
+            why.append(f"folio sides given on wording {c.get('wording')!r}, which gives lines only")
+        if not about.get("count") and not about.get("sides"):
+            why.append("no lines and no folio sides")
+    elif not about.get("lines"):
         why.append("no lines")
     return why
 
@@ -106,8 +127,9 @@ def open_package(data, priv=None):
     inner = seal.open_sealed(about.get("seal") or {}, sealed, priv or seal.load_private())
     with zipfile.ZipFile(io.BytesIO(inner)) as z:
         a = json.loads(z.read("contribution.json").decode("utf-8"))
-    if (a.get("consent") or {}) != (about.get("consent") or {}) or len(a.get("lines") or []) != about.get("count"):
-        raise SystemExit(f"[contributions] {about['id']}: what is sealed is not what the package says (consent or count)")
+    if ((a.get("consent") or {}) != (about.get("consent") or {}) or len(a.get("lines") or []) != about.get("count")
+            or len(a.get("sides") or []) != (about.get("sides") or 0) or (a.get("manuscript") or {}).get("script") != (about.get("manuscript") or {}).get("script")):
+        raise SystemExit(f"[contributions] {about['id']}: what is sealed is not what the package says (consent, counts, or script)")
     return about, inner, about["id"]
 
 
@@ -123,7 +145,7 @@ def add(path, accept=(), came=None, priv=None):
     with zipfile.ZipFile(io.BytesIO(inner)) as z:
         a = json.loads(z.read("contribution.json").decode("utf-8"))
         names = set(z.namelist())
-        missing = [l["image"] for l in a["lines"] if l["image"] not in names]
+        missing = [l["image"] for l in a["lines"] if l["image"] not in names] + [x for sd in a.get("sides") or [] for x in (sd["image"], sd["geometry"]) if x not in names]
         if missing:
             raise SystemExit(f"[contributions] {path}: not taken: missing {', '.join(missing[:5])}")
         cid = cid or f"c{datetime.date.today():%Y%m%d}-{hashlib.sha256(data).hexdigest()[:12]}"
@@ -132,16 +154,18 @@ def add(path, accept=(), came=None, priv=None):
         out = ROOT / cid
         out.mkdir(parents=True, exist_ok=True)
         for n in names:
-            if n == "contribution.json" or (n.startswith("lines/") and not n.endswith("/") and ".." not in n):
+            if n == "contribution.json" or (n.startswith(("lines/", "sides/")) and not n.endswith("/") and ".." not in n):
                 (out / n).parent.mkdir(parents=True, exist_ok=True)
                 (out / n).write_bytes(z.read(n))
     c = a["consent"]
     rows = _rows()
-    rows.append(dict({"id": cid, "manuscript": c.get("name", ""), "lines": len(a["lines"]), "wording": c.get("wording", ""),
+    rows.append(dict({"id": cid, "manuscript": c.get("name", ""), "script": (a.get("manuscript") or {}).get("script", ""), "lines": len(a["lines"]),
+                      "sides": len(a.get("sides") or []), "wording": c.get("wording", ""),
                       "consent_date": c.get("date", "")[:10], "added": datetime.datetime.now().isoformat(timespec="seconds"), "state": "registered",
                       "note": "" if c.get("wording") in APPROVED else f"wording {c.get('wording')} taken for a trial (--accept-wording)"}, **(came or {})))
     _write(rows)
-    print(f"[contributions] {cid}: {len(a['lines'])} lines of {c.get('name')!r} registered ({out})")
+    print(f"[contributions] {cid}: {len(a['lines'])} lines and {len(a.get('sides') or [])} folio sides of {c.get('name')!r} "
+          f"({(a.get('manuscript') or {}).get('script') or 'no script stated'}) registered ({out})")
     return cid
 
 
@@ -151,10 +175,11 @@ def withdraw(cid, why=""):
     if not row:
         raise SystemExit(f"[contributions] no contribution {cid}")
     shutil.rmtree(ROOT / cid / "lines", ignore_errors=True)
+    shutil.rmtree(ROOT / cid / "sides", ignore_errors=True)
     row["state"] = "withdrawn"
     row["note"] = (f"withdrawn {datetime.date.today()}" + (f": {why}" if why else "")).strip()
     _write(rows)
-    print(f"[contributions] {cid}: withdrawn; its lines deleted, its row kept")
+    print(f"[contributions] {cid}: withdrawn; its lines and sides deleted, its row kept")
 
 
 _JUDGES = {}
@@ -177,9 +202,50 @@ def _judge(pack):
     return name, net, chars, src
 
 
+_SEGMENTER = []
+
+
+def _check_sides(r, d, about, seen):
+    """each folio side checked (msocr.sidequality) and, where the segmenter's rows bear out its editor's counts in every
+    block, its target written beside it (sides/<folio>.seg.json) -> [{image, folio, reasons, counts, target, usable}]"""
+    import numpy as np
+    from . import sidequality as SQ, tseg
+    if not _SEGMENTER:
+        _SEGMENTER.append((tseg.load_net()[0], tseg.device()))
+    net, dev = _SEGMENTER[0]
+    out = []
+    for sd in about.get("sides") or []:
+        rec = {"image": sd["image"], "folio": sd.get("folio", ""), "layout": sd.get("layout", ""), "reasons": []}
+        jpg, geo = d / sd["image"], d / sd["geometry"]
+        try:
+            geom = json.loads(geo.read_text(encoding="utf-8"))
+        except Exception:
+            geom = {}
+        g, why = SQ.check(jpg.read_bytes(), geom) if jpg.exists() and ".." not in sd["image"] else (None, ["image: missing"])
+        rec["reasons"] += why
+        if g is not None:
+            px = hashlib.sha256(np.asarray(g).tobytes()).hexdigest()
+            if px in seen:
+                rec["reasons"].append(f"copy: the same side as {seen[px]}")
+            else:
+                seen[px] = f"{r['id']}/{sd['image']}"
+            seg, counts, why = SQ.verify(jpg, geom, net, dev)
+            rec["counts"] = counts
+            rec["reasons"] += why
+            if not rec["reasons"]:
+                target = jpg.with_suffix(".seg.json")
+                target.write_text(json.dumps(seg), encoding="utf-8")
+                rec["target"] = str(target.relative_to(d))
+        rec["usable"] = not rec["reasons"]
+        out.append(rec)
+    return out
+
+
 def quality(verbose=True):
-    """check every registered package's lines (msocr.linequality), in the order they came: quality.json in each package's
-    folder, and the verdict and the usable lines in the register"""
+    """check every registered package (msocr.linequality for its lines, msocr.sidequality for its folio sides), in the
+    order they came: quality.json in each package's folder, and the verdict and what is usable in the register. Only a
+    package of the language and script the models here are for (MODELS_SCRIPT) is checked and can be used; another's
+    is kept for a model of its own, and touches nothing here."""
     from . import linequality as LQ
     rows = _rows()
     seen = {}
@@ -188,6 +254,14 @@ def quality(verbose=True):
             continue
         d = ROOT / r["id"]
         about = json.loads((d / "contribution.json").read_text(encoding="utf-8"))
+        if r.get("script") != MODELS_SCRIPT:
+            out = {"checked": datetime.datetime.now().isoformat(timespec="seconds"), "verdict": "other-script",
+                   "reasons": [f"{r.get('script') or 'no language and script stated'}: no model here is for it, so nothing here uses it"]}
+            (d / "quality.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+            r["quality"], r["usable"], r["usable_sides"] = "other-script", 0, 0
+            if verbose:
+                print(f"[quality] {r['id']} {r['manuscript']!r}: kept, not used: {out['reasons'][0]}")
+            continue
         lines, images = [], []
         for l in about["lines"]:
             rec = {"image": l["image"], "folio": l.get("folio", ""), "block": l.get("block", ""), "reasons": []}
@@ -232,20 +306,24 @@ def quality(verbose=True):
         accepted = r.get("quality") == "accepted"
         v, why, summary = LQ.verdict(lines, accepted=accepted)
         state = "accepted" if accepted else v
+        sides = _check_sides(r, d, about, seen) if about.get("sides") and r.get("wording") in SIDES else []
+        summary.update(sides=len(sides), sides_usable=sum(x["usable"] for x in sides))
         out = {"checked": datetime.datetime.now().isoformat(timespec="seconds"), "verdict": state, "reasons": why, "summary": summary,
-               "judges": judged, "limits": LQ.LIMITS, "lines": lines}
+               "judges": judged, "limits": LQ.LIMITS, "lines": lines, "sides": sides}
         (d / "quality.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
-        r["quality"], r["usable"] = state, summary["usable"] if state in ("ok", "accepted") else 0
+        good = state in ("ok", "accepted")
+        r["quality"], r["usable"], r["usable_sides"] = state, summary["usable"] if good else 0, summary["sides_usable"] if good else 0
         if verbose:
-            print(f"[quality] {r['id']} {r['manuscript']!r}: {state}; {summary['usable']} of {summary['lines']} lines usable"
+            print(f"[quality] {r['id']} {r['manuscript']!r} ({r.get('script')}): {state}; {summary['usable']} of {summary['lines']} lines usable"
                   + (f", reading {100 * summary['reading_median']:.0f} % at the median" if summary["reading_median"] is not None else "")
+                  + (f"; {summary['sides_usable']} of {len(sides)} folio sides borne out by their editor's counts" if sides else "")
                   + ("".join(f"\n    ! {w}" for w in why)))
             fails = {}
-            for x in lines:
+            for x in lines + sides:
                 for w in x["reasons"]:
                     fails[w.split(":")[0]] = fails.get(w.split(":")[0], 0) + 1
             if fails:
-                print("    lines failing: " + ", ".join(f"{n} on {k}" for k, n in sorted(fails.items())))
+                print("    failing: " + ", ".join(f"{n} on {k}" for k, n in sorted(fails.items())))
     _write(rows)
     return rows
 
@@ -308,16 +386,34 @@ def sync(inbox=INBOX):
           f"{len(allowed())} line(s) training may use")
 
 
-def allowed():
+def allowed(script=MODELS_SCRIPT):
+    """the lines a recogniser of `script` may learn from"""
     out = []
     for r in _rows():
-        if r["state"] != "registered" or r["wording"] not in APPROVED or r.get("quality") not in ("ok", "accepted"):
+        if (r["state"] != "registered" or r["wording"] not in APPROVED or r.get("quality") not in ("ok", "accepted")
+                or r.get("script") != script):
             continue
         q = json.loads((ROOT / r["id"] / "quality.json").read_text(encoding="utf-8"))
         for l in q["lines"]:
             png = ROOT / r["id"] / l["image"]
             if l["usable"] and png.exists():
                 out.append({"manuscript": r["manuscript"], "png": png, "text": l["text"], "id": r["id"], "folio": l["folio"], "release": r.get("release", "")})
+    return out
+
+
+def allowed_sides(script=MODELS_SCRIPT):
+    """the folio sides a segmenter of `script` may learn from: registered on a wording that gives sides, approved, of a
+    package checked ok or accepted, borne out by their editor's counts -> [{manuscript, image, target, id, folio, release}]"""
+    out = []
+    for r in _rows():
+        if (r["state"] != "registered" or r["wording"] not in SIDES or r.get("quality") not in ("ok", "accepted")
+                or r.get("script") != script):
+            continue
+        q = json.loads((ROOT / r["id"] / "quality.json").read_text(encoding="utf-8"))
+        for x in q.get("sides") or []:
+            if x.get("usable") and (ROOT / r["id"] / x["target"]).exists():
+                out.append({"manuscript": r["manuscript"], "image": ROOT / r["id"] / x["image"], "target": ROOT / r["id"] / x["target"],
+                            "id": r["id"], "folio": x["folio"], "release": r.get("release", "")})
     return out
 
 
