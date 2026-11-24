@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Browser model timing</title>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/ort.all.min.js"></script>
+<script>
+// ?ep=wasm|webgpu&threads=N — numThreads must be set before the first session, so each setting gets its own page load
+const q = new URLSearchParams(location.search);
+const EP = q.get('ep') || 'wasm';
+const THREADS = +(q.get('threads') || 1);
+ort.env.wasm.numThreads = THREADS;
+
+function rand(n) { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = Math.random(); return a; }
+function tokens(n) { const a = new BigInt64Array(n); for (let i = 0; i < n; i++) a[i] = BigInt(2 + Math.floor(Math.random() * 52)); return a; }
+const MODELS = [
+  { name: 'segmenter, one page 640x1456', file: 'models/segmenter.onnx', reps: 3, feed: () => new ort.Tensor('float32', rand(640 * 1456), [1, 1, 640, 1456]) },
+  { name: 'recogniser, one line 48x1800', file: 'models/recogniser.onnx', reps: 5, feed: () => new ort.Tensor('float32', rand(48 * 1800), [1, 1, 48, 1800]) },
+  { name: 'spacer, 20 sentences x 120 letters', file: 'models/spacer.onnx', reps: 5, feed: () => new ort.Tensor('int64', tokens(20 * 120), [20, 120]) },
+];
+const median = (v) => v.slice().sort((a, b) => a - b)[Math.floor(v.length / 2)];
+
+window.runBench = async () => {
+  const env = { ep: EP, threads: THREADS, isolated: self.crossOriginIsolated, cores: navigator.hardwareConcurrency,
+                webgpu: !!navigator.gpu, ua: navigator.userAgent.replace(/.*(Chrome\/[\d.]+).*/, '$1') };
+  if (EP === 'webgpu' && navigator.gpu) env.adapter = !!(await navigator.gpu.requestAdapter());
+  const out = [];
+  for (const m of MODELS) {
+    const r = { model: m.name };
+    try {
+      let t = performance.now();
+      const s = await ort.InferenceSession.create(m.file, { executionProviders: EP === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm'] });
+      r.load_ms = Math.round(performance.now() - t);
+      const feeds = { x: m.feed() };
+      t = performance.now(); await s.run(feeds); r.first_ms = Math.round(performance.now() - t);
+      const ts = [];
+      for (let i = 0; i < m.reps; i++) { t = performance.now(); await s.run(feeds); ts.push(performance.now() - t); }
+      r.run_ms = Math.round(median(ts));
+      await s.release();
+    } catch (e) { r.error = String(e.message || e).slice(0, 160); }
+    out.push(r);
+  }
+  return { env, out };
+};
+</script>
+<p>Timing page: the runner calls <code>runBench()</code>.</p>

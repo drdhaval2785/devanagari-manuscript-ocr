@@ -1,0 +1,89 @@
+# devanagari-manuscript-ocr (this folder: manuscript_ocr) — a generic Sanskrit manuscript OCR tool. Git keeps the code
+# and its documentation only. Manuscript data of any kind (images, segmentations, readings, corrections, TEI, review
+# verdicts, trained weights) lives elsewhere: the manuscript data in its own repository, released segmentations and
+# weights in another. Extensions are matched in either case ([pP][nN][gG]), so that a scan named PAGE.JPG stays out
+# on any system.
+
+# ---- Manuscript images and anything cut or drawn from them: they are not for distribution
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]
+*.[pP][nN][gG]
+*.[tT][iI][fF]
+*.[tT][iI][fF][fF]
+*.[wW][eE][bB][pP]
+*.[pP][dD][fF]
+*.[jJ][pP]2
+*.[jJ]2[kK]
+*.[gG][iI][fF]
+*.[bB][mM][pP]
+*.[hH][eE][iI][cC]
+*.[sS][vV][gG]
+# ... except the synthetic page made by the tool itself (printed text, no manuscript)
+!/tools/fixtures/*.png
+
+# ---- Manuscript text and segmentation, wherever a run leaves it: TEI and PAGE XML, line ground truth, packages
+*.[xX][mM][lL]
+*.gt.txt
+*.[zZ][iI][pP]
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+
+# ---- Trained weights: large, and published on their own (CC BY-SA 4.0), not in the code's history
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.npz
+*.npy
+*.h5
+*.pkl
+*.pickle
+*.mlmodel
+*.mlpackage/
+/tools/browser_bench/models/
+
+# ---- Keys and secrets: the contribution key lives in ~/.config/manuscribe, never here
+*.pem
+*.key
+.env
+.env.*
+
+# ---- Python environments, caches, system and editor files
+.venv/
+.venv-*/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+node_modules/
+.DS_Store
+._*
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- Run logs and their one-off launch scripts; reports on particular manuscripts
+/logs/
+*.log
+/LAYOUTS.md
+
+# ---- Copies of earlier code, kept while the project had no version control
+/backups/
+
+# ---- data/: the manuscripts' own files (layouts, segmentation, readings, corrections, TEI, review verdicts, page
+#      splits, trained models, the pinned Kraken model, contributed lines) are kept in the manuscript-data repository,
+#      not with the tool. Only the description of the folder's layout is tracked.
+/data/*
+!/data/README.md
