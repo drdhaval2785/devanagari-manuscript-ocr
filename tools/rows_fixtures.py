@@ -9,6 +9,8 @@ JavaScript port (app/js/recogrows.js, tests/t-recog-conformance.js) can be held 
      lines.json   Kraken's lines of the page (data/<ms>/seg/<stem>.json), baseline and boundary only
      rows.json    reference.rows(lines, grey, layout): {box: [[baseline, outline], ...]}, as the pack's 05_rows.json
      meta.json    {"layout", "width", "height"}, and the manuscript, the page and why it was chosen
+     untold.json  blocks.page_blocks(seg, size, grey) not told the layout: {box: rows found in it}, what Manuscribe tells a
+                  manuscript's layout from (its RecogRows.untold)
    data/fixtures/rows/index.json lists them, with the version of msocr/pipeline.json they were made with. The pages are manuscript pages: they stay in data/, never distributed.
 
 The pages are chosen with a fixed seed among the text pages of every manuscript with a segmentation and a layout: some of
@@ -26,7 +28,7 @@ import shutil
 import numpy as np
 from PIL import Image
 
-from msocr import align, reference
+from msocr import align, blocks, reference
 from msocr.blocks import layout_of
 from msocr.config import DATA, MANUSCRIPTS, not_text
 from msocr.params import VERSION
@@ -70,6 +72,12 @@ def load(ms, stem):
     lines = [{"baseline": l["baseline"], "boundary": l["boundary"]} for l in seg["lines"]]
     page = np.asarray(Image.open(MANUSCRIPTS[ms]["images"] / f"{stem}.jpg").convert("RGB"))
     return lines, reference.grey(page)
+
+
+def untold(lines, g):
+    """the blocks the lines fall into, the block finder not told the layout -> {box: rows}"""
+    found, _ = blocks.page_blocks({"lines": lines}, (g.shape[1], g.shape[0]), g)
+    return {b: len(x["rows"]) for b, x in found.items()}
 
 
 def has_commentary(ms, stem):
@@ -137,6 +145,7 @@ def main():
         json.dump(lines, open(d / "lines.json", "w"))
         json.dump({b: [[list(map(list, base)), list(map(list, outl))] for base, outl in rs] for b, rs in rows.items()},
                   open(d / "rows.json", "w"))
+        json.dump(untold(lines, g), open(d / "untold.json", "w"))
         meta = {"layout": layout, "width": int(g.shape[1]), "height": int(g.shape[0]), "manuscript": ms, "page": stem, "chosen": why}
         json.dump(meta, open(d / "meta.json", "w"), indent=1)
         counts = {b: len(rs) for b, rs in rows.items()}
