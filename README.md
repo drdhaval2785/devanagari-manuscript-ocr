@@ -3,8 +3,9 @@
 OCR for handwritten Sanskrit manuscripts in Devanagari: https://github.com/drdhaval2785/devanagari-manuscript-ocr
 (the folder is called `manuscript_ocr` on the developer's computer, and the paths in these notes say so). Plan and tool survey: [ROADMAP.md](ROADMAP.md).
 
-Version 0.11.0 (24 November 2026; `msocr.__version__`), released with Manuscribe 0.11.0, whose recognition in the
-browser it is the reference of.
+Version 0.12.0 (24 November 2026; `msocr.__version__`), released with Manuscribe 0.12.0, whose recognition in the
+browser it is the reference of. Manuscribe and its companions (this, sanskrit_spacer, manuscribe-models,
+manuscribe-contributions) always carry the same version number: use the same version of each.
 
 The code is under the GNU General Public License v3 ([LICENSE](LICENSE)), as Manuscribe's is; the trained weights it
 makes are published separately under CC BY-SA 4.0.
