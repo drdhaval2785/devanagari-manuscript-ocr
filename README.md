@@ -3,7 +3,7 @@
 OCR for handwritten Sanskrit manuscripts in Devanagari: https://github.com/drdhaval2785/devanagari-manuscript-ocr
 (the folder is called `manuscript_ocr` on the developer's computer, and the paths in these notes say so). Plan and tool survey: [ROADMAP.md](ROADMAP.md).
 
-Version 0.13.0 (24 November 2026; `msocr.__version__`), released with Manuscribe 0.13.0, whose recognition in the
+Version 0.13.1 (24 November 2026; `msocr.__version__`), released with Manuscribe 0.13.1, whose recognition in the
 browser it is the reference of. Manuscribe and its companions (this, sanskrit_spacer, manuscribe-models,
 manuscribe-contributions) always carry the same version number: use the same version of each.
 
@@ -249,7 +249,7 @@ and 82668 qualify. `finetune` and `pool` take `--seg seg_torch` to learn from th
 cut is left out rather than mixed in. ft6, run4 adapted to LDII_19634 on its corrected pages cut so (ft5's settings and
 pages), reads LDII_19634's two held-out pages cut the U-Net's way with 3.44 % of characters wrong, against ft5's 4.35 %
 and ft4's 4.75 %, and LDII_85885's test pages with 1.90 % against ft4's 2.66 %: it is the recogniser of
-`pack-20261124b-p1-s1`, the pack Manuscribe 0.13.0 fetches.
+`pack-20261124b-p1-s1`, the pack Manuscribe fetches since 0.13.0.
 
 ## Our own segmenter (PyTorch), the default since 2026-11-24
 
