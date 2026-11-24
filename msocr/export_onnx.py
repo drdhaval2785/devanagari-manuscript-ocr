@@ -2,7 +2,9 @@
 
     .venv-onnx/bin/python -m msocr.export_onnx [--seg tseg1] [--rec data/LDII_19634/models/ft4/best.pt] [--spacer full_e10_s1]
 
--> data/model_pack/<pack>/ (pack = pack-<date>-p<pipeline version>-s<spacer version>):
+-> data/model_pack/<pack>/ (pack = pack-<date>-p<pipeline version>-s<spacer version>; a second pack made the same day is
+   pack-<date>b-..., a third pack-<date>c-..., so that no pack a browser may keep is ever replaced under its own name;
+   --overwrite makes the day's first again):
      segmenter.onnx, recogniser.onnx, spacer.onnx    the networks, opset 17, inputs named "x", outputs "y"
      pipeline.json, spacer.json                      the parameters the stages between the networks use
      recogniser_chars.json                           the recogniser's characters (class k + 1 is chars[k]; 0 is blank)
@@ -79,10 +81,15 @@ def main():
     ap.add_argument("--seg", default="tseg1")
     ap.add_argument("--rec", default=str(DATA / "LDII_19634" / "models" / "ft4" / "best.pt"))
     ap.add_argument("--spacer", default="full_e10_s1")
+    ap.add_argument("--overwrite", action="store_true", help="make the day's pack again under its own name")
     a = ap.parse_args()
     sys.path.insert(0, SPACER)
     spacer_spec = json.load(open(os.path.join(SPACER, "spacer.json"), encoding="utf-8"))
-    name = f"pack-{datetime.date.today():%Y%m%d}-p{PIPELINE_VERSION}-s{spacer_spec['version']}"
+    day, k = f"{datetime.date.today():%Y%m%d}", 0
+    name = f"pack-{day}-p{PIPELINE_VERSION}-s{spacer_spec['version']}"
+    while (DATA / "model_pack" / name).exists() and not a.overwrite:
+        k += 1
+        name = f"pack-{day}{chr(ord('a') + k)}-p{PIPELINE_VERSION}-s{spacer_spec['version']}"
     out = DATA / "model_pack" / name
     out.mkdir(parents=True, exist_ok=True)
 
