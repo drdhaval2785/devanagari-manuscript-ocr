@@ -78,6 +78,8 @@ def _recogniser_lineage(source):
             ck = torch.load(p, map_location="cpu")
             if ck.get("contributions"):
                 step["contributions"] = ck["contributions"]
+            if ck.get("lines"):
+                step["lines_from"] = ck["lines"]          # seg: cut from Kraken's segmentation; seg_torch: the U-Net's
         out.append(step)
         p = base
     return out
@@ -155,7 +157,8 @@ def _card_md(m):
               f"at about the median.", "", "## Recogniser", "",
               f"Characters: {m['models']['recogniser']['classes'] - 1}. Trained, run after run:", ""]
     for s in reversed(rec["lineage"]):
-        lines.append(f"- `{s['run']}` on {s['manuscript']}" + (f", {s['lines']} lines" if s.get("lines") else ""))
+        lines.append(f"- `{s['run']}` on {s['manuscript']}" + (f", {s['lines']} lines" if s.get("lines") else "")
+                     + (", cut from the U-Net's segmentation as Manuscribe cuts them" if s.get("lines_from") == "seg_torch" else ""))
     lines += ["", "It reads the hands it learned from well and other hands poorly: a model pooled over many hands is "
               "to replace it.", "", "## Word spacer", "", f"Run `{sp['run']}`, trained on {sp['texts']}. Threshold "
               f"{m['models']['spacer']['threshold']}.", "", "## Consent", ""]
