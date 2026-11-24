@@ -25,7 +25,12 @@ Files written to data/<ms>/models/<run>/ : train.log, history.csv, best.pt, last
 Which lines: --seg seg (the default) trains on the lines align paired from Kraken's segmentation, cut by Kraken's
 extract_polygons (lines/<split>/, as run1-run3 were); --seg seg_torch on those it paired from our U-Net's, cut by our
 own cutter exactly as predict and Manuscribe cut them (lines_seg_torch/<split>/, from align --seg=seg_torch), so that
-the recogniser learns from the line images it will read.
+the recogniser learns from the line images it will read. finetune and pool take --seg too: a corrected manuscript's
+pages are then those `recut` cut again from that segmentation (lines_<seg>/corrected/, only pages whose rows match their
+corrected lines in number and in reading; corrected/ and lines/pred/ untouched), and a manuscript without lines of that
+cut is left out rather than mixed in.
+
+    recut LDII_19634 --seg seg_torch     the corrected pages cut again from the U-Net's lines, for finetune/pool --seg
 
 Three ways to train
   train     LDII_85885 --run run1      a blank model on one transcribed manuscript (stages 1 and 2)
@@ -386,16 +391,76 @@ def load_model(path):
     return net, ck["chars"], ck
 
 
-def load_corrected(ms_id):
+JUDGE = Path(__file__).resolve().parent.parent / "data" / "LDII_19634" / "models" / "ft4" / "best.pt"
+
+
+def recut_corrected(ms_id, seg="seg_torch", judge=JUDGE, verbose=True):
+    """A manuscript's corrected pages cut again from another segmentation's lines, into a set of their own
+    (lines_<seg>/corrected/, the pages taken listed in taken.txt), as predict would cut them now; corrected/ and
+    lines/pred/ are not touched. A page is taken only where every block has as many rows as its corrected text has
+    lines, and the judge (a recogniser) reads every line as its text, within 60 % of its characters and within 35 % at
+    the page's median (msocr.linequality's limits): a row that is not the line whose text it is paired with reads far
+    from it. -> (pages taken, [(page, why not)])"""
+    import shutil
+    import statistics
+    import tempfile
+    from . import pagetext
+    from .linequality import LIMITS, cer
+    from .predict import read_page
+    from .segment import ensure_segmented, reading_from
+    d = ms_dir(ms_id)
+    out = lines_dir(ms_id, seg) / "corrected"
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    net, chars, _ = load_model(judge)
+    pages = sorted((d / "corrected").glob("*.txt"))
+    ensure_segmented(ms_id, [t.stem + ".jpg" for t in pages], seg)
+    taken, refused = [], []
+    for txt in pages:
+        want = {b: [t.strip().replace(" ", "") for t in ls] for b, ls in pagetext.read(txt).items()}
+        for b in want:
+            while want[b] and not want[b][-1]:
+                want[b].pop()
+        with tempfile.TemporaryDirectory() as t:
+            with reading_from(seg):
+                got, note, warn = read_page(ms_id, txt.stem + ".jpg", net, chars, Path(t))
+            counts = {b: len(got.get(b, [])) for b in set(want) | set(got)}
+            why = [f"{b}: {counts[b]} rows, {len(want.get(b, []))} corrected lines" for b in sorted(counts) if counts[b] != len(want.get(b, []))]
+            if not why:
+                diffs = [cer(r["text"], w) for b in want for r, w in zip(got[b], want[b]) if w]
+                far = sum(x > LIMITS["reading_max"] for x in diffs)
+                if far or (diffs and statistics.median(diffs) > LIMITS["package_reading_median_max"]):
+                    why.append(f"rows not the lines of the text: {far} read more than 60 % away, median {100 * statistics.median(diffs):.0f} %")
+            if why:
+                refused.append((txt.stem, "; ".join(why)))
+                continue
+            for f in Path(t).glob("*.png"):
+                shutil.copy(f, out / f.name)
+            taken.append(txt.stem)
+    (out / "taken.txt").write_text("".join(f"{x}\n" for x in taken), encoding="utf-8")
+    if verbose:
+        print(f"[recut] {ms_id}: {len(taken)} of {len(pages)} corrected pages cut from {seg} into {out}")
+        for stem, why in refused:
+            print(f"  - {stem}: {why}")
+    return taken, refused
+
+
+def load_corrected(ms_id, seg="seg"):
     """Corrected pages of a manuscript: data/<ms>/corrected/<page>.txt, one text line per
     manuscript line (blocks after ;box{...} markers, see pagetext.py), paired with the line
-    images that `predict` cut for that page and block."""
+    images that `predict` cut for that page and block; with another seg, with those recut_corrected cut from its
+    lines (only the pages it took)."""
     from . import pagetext
     d = ms_dir(ms_id)
+    pred = d / "lines" / "pred" if seg == "seg" else lines_dir(ms_id, seg) / "corrected"
+    only = None if seg == "seg" else set((pred / "taken.txt").read_text().split()) if (pred / "taken.txt").exists() else set()
     pages, problems = {}, []
     for txt in sorted((d / "corrected").glob("*.txt")):
+        if only is not None and txt.stem not in only:
+            continue
         boxes = pagetext.read(txt)
-        names = sorted(f.name for f in (d / "lines" / "pred").glob(f"{txt.stem}_*.png"))
+        names = sorted(f.name for f in pred.glob(f"{txt.stem}_*.png"))
         samples = []
         for box, texts in boxes.items():
             pat = pagetext.image_pattern(txt.stem, box)
@@ -408,7 +473,7 @@ def load_corrected(ms_id):
                 samples = None
                 break
             # a line left empty (nothing written there, an ornament) teaches nothing and is left out
-            samples += [(to_tensor(Image.open(d / "lines" / "pred" / n)), t, n[:-4]) for n, t in zip(imgs, texts) if t]
+            samples += [(to_tensor(Image.open(pred / n)), t, n[:-4]) for n, t in zip(imgs, texts) if t]
         if samples is not None:
             pages[txt.stem] = samples
     return pages, problems
@@ -428,7 +493,7 @@ def _extend_alphabet(net, chars, texts):
     return chars, added
 
 
-def finetune(ms_id, base, run="ft1", passes=30, lrate=3e-4, holdout=1, mix=3, base_ms="LDII_85885", threads=6, seed=0):
+def finetune(ms_id, base, run="ft1", passes=30, lrate=3e-4, holdout=1, mix=3, base_ms="LDII_85885", threads=6, seed=0, seg="seg"):
     """Adapt a trained model to a new hand from a few corrected pages.
 
     - starts from the weights of `base`; no warm-up on pieces is needed
@@ -446,7 +511,8 @@ def finetune(ms_id, base, run="ft1", passes=30, lrate=3e-4, holdout=1, mix=3, ba
     rng = random.Random(seed)
 
     print(f"\n[finetune] run '{run}' on {ms_id}, starting from {base}   ({time.strftime('%Y-%m-%d %H:%M')})")
-    pages, problems = load_corrected(ms_id)
+    print(f"  lines            : {'cut from Kraken segmentation' if seg == 'seg' else f'cut from {seg} by our own cutter (recut_corrected; lines_{seg}/)'}")
+    pages, problems = load_corrected(ms_id, seg)
     for pr in problems:
         print(f"  ! {pr}")
     names = sorted(pages)
@@ -455,8 +521,8 @@ def finetune(ms_id, base, run="ft1", passes=30, lrate=3e-4, holdout=1, mix=3, ba
         return None
     new_train = [s for n in names[:-holdout] for s in pages[n]]
     new_test = [s for n in names[-holdout:] for s in pages[n]]
-    old_train = load_split(base_ms, "train")
-    old_val = load_split(base_ms, "val")[:120]
+    old_train = load_split(base_ms, "train", seg=seg)
+    old_val = load_split(base_ms, "val", seg=seg)[:120]
 
     net, chars, ck = load_model(base)
     chars, added = _extend_alphabet(net, chars, [s[1] for s in new_train + new_test])
@@ -498,7 +564,7 @@ def finetune(ms_id, base, run="ft1", passes=30, lrate=3e-4, holdout=1, mix=3, ba
         cer_old, _ = evaluate(net, old_val, chars)
         if cer_new < best:
             best, best_ep = cer_new, ep
-            torch.save({"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": cer_new}, run_dir / "best.pt")
+            torch.save({"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": cer_new, "lines": seg}, run_dir / "best.pt")
         verdict = "new best" if best_ep == ep else f"no gain for {ep - best_ep} pass(es)"
         if best_ep != ep and (ep - best_ep) % 3 == 0:
             for g in opt.param_groups:
@@ -561,7 +627,7 @@ def contributed_sources(exclude=()):
     return out
 
 
-def pool_sources(ms_ids=None, holdout=1, exclude=(), contributions=True):
+def pool_sources(ms_ids=None, holdout=1, exclude=(), contributions=True, seg="seg"):
     """Every manuscript with training text, as (ms_id, kind, train lines, score lines).
     kind 'transcribed': a manuscript aligned from its TEI (lines/train, scored on lines/val);
     kind 'corrected'  : a manuscript with corrected/ pages (the last `holdout` pages are scored, the rest trained on);
@@ -574,10 +640,16 @@ def pool_sources(ms_ids=None, holdout=1, exclude=(), contributions=True):
         if not d.is_dir() or (ms_ids and ms not in ms_ids and ms not in exclude):
             continue
         if list((d / "lines" / "train").glob("*.png")):
-            tr, sc = load_split(ms, "train"), load_split(ms, "val")[:120]
+            if not list((lines_dir(ms, seg) / "train").glob("*.png")):     # lines of one cut only: no mixing of the two
+                print(f"  ! {ms}: no lines from {seg} (python -m msocr.align {ms} --seg={seg}); left out")
+                continue
+            tr, sc = load_split(ms, "train", seg=seg), load_split(ms, "val", seg=seg)[:120]
             found.append((ms, "transcribed", tr, sc))
         elif list((d / "corrected").glob("*.txt")):
-            pages, problems = load_corrected(ms)
+            if seg != "seg" and not (lines_dir(ms, seg) / "corrected" / "taken.txt").exists():
+                print(f"  ! {ms}: its corrected pages not cut from {seg} (python -m msocr.recognizer recut {ms} --seg {seg}); left out")
+                continue
+            pages, problems = load_corrected(ms, seg)
             for pr in problems:
                 print(f"  ! {ms} {pr}")
             names = sorted(pages)
@@ -596,7 +668,7 @@ def pool_sources(ms_ids=None, holdout=1, exclude=(), contributions=True):
 
 
 def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1, ms_ids=None, exclude=(), threads=6, seed=0, lag=8,
-         contributions=True):
+         contributions=True, seg="seg"):
     """Continue a trained model on every manuscript that has training text, all at once.
 
     - every pass draws the same number of lines (per_pass / number of manuscripts) from each
@@ -624,7 +696,8 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
 
     print(f"\n[pool] run '{run}', starting from {base}   ({time.strftime('%Y-%m-%d %H:%M')})")
     t = time.time()
-    sources = pool_sources(ms_ids, holdout, exclude, contributions=False)
+    print(f"  lines            : {'cut from Kraken segmentation' if seg == 'seg' else f'cut from {seg} by our own cutter'} (contributed lines: as Manuscribe cut them)")
+    sources = pool_sources(ms_ids, holdout, exclude, contributions=False, seg=seg)
     packages = []
     if contributions:
         contrib = contributed_sources(exclude)
@@ -710,7 +783,7 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
             tot_loss += loss.item()
             tot_chars += int(tl.sum())
         mean, own, cers = score()
-        state = {"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": mean, "own_cer": own,
+        state = {"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": mean, "own_cer": own, "lines": seg,
                  "sources": [f[0] for f in training], "contributions": packages}
         if mean < best and own <= own0 + OWN_GUARD:
             best, best_ep, flat = mean, ep, 0
@@ -759,7 +832,7 @@ def test(ms_id, run="run1", show=5, model=None, seg="seg"):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["train", "test", "finetune", "pool"])
+    ap.add_argument("command", choices=["train", "test", "finetune", "pool", "recut"])
     ap.add_argument("--base", default=str(ms_dir("LDII_85885") / "models" / "run3" / "best.pt"), help="model to fine-tune from")
     ap.add_argument("--passes", type=int, default=30)
     ap.add_argument("--holdout", type=int, default=1, help="corrected pages kept back for scoring")
@@ -779,13 +852,15 @@ if __name__ == "__main__":
     a = ap.parse_args()
     if a.command == "pool":
         pool(a.run, a.base, a.passes, per_pass=a.per_pass, holdout=a.holdout, ms_ids=a.ms_id or None, exclude=a.exclude,
-             threads=a.threads, lag=a.lag, contributions=not a.no_contributions)
+             threads=a.threads, lag=a.lag, contributions=not a.no_contributions, seg=a.seg)
         raise SystemExit
     if len(a.ms_id) != 1:
         ap.error(f"{a.command} takes exactly one manuscript")
     if a.command == "train":
         train(a.ms_id[0], a.run, a.max_passes, a.lag, a.lrate, threads=a.threads, limit=a.limit, augment_on=not a.no_augment, seg=a.seg)
     elif a.command == "finetune":
-        finetune(a.ms_id[0], a.base, a.run, a.passes, holdout=a.holdout, threads=a.threads)
+        finetune(a.ms_id[0], a.base, a.run, a.passes, holdout=a.holdout, threads=a.threads, seg=a.seg)
+    elif a.command == "recut":
+        recut_corrected(a.ms_id[0], a.seg if a.seg != "seg" else "seg_torch")
     else:
         test(a.ms_id[0], a.run, model=a.model, seg=a.seg)
