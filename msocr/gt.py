@@ -13,6 +13,10 @@ towards what the scribe wrote in the main text block:
     <space quantity="n"/>                          -> one space
     <hi>, <quote>, <lg>, <div>                     -> transparent
 
+अ followed by ा, ो or ौ becomes आ, ओ, औ: the scribe turns अ into आ by adding the stroke above the
+line, which the TEI rightly records as अ<add place="supralinear">ा</add>, but अ + ा is not a
+Unicode letter (and the recogniser would learn it so).
+
 The manuscript has no word spacing; the spaces in the TEI are the editor's. `text` has
 them removed (used for training), `text_spaced` keeps them.
 """
@@ -26,6 +30,7 @@ from lxml import etree
 from .config import MANUSCRIPTS, ms_dir
 
 DROP = {"note", "del", "corr", "supplied"}
+JOIN_A = {"ा": "आ", "ो": "ओ", "ौ": "औ"}     # अ with a vowel sign added to it -> the vowel
 
 
 def _local(el):
@@ -75,6 +80,7 @@ def extract(ms_id: str, verbose: bool = True):
     out = []
     for ln in lines:
         spaced = unicodedata.normalize("NFC", re.sub(r"\s+", " ", "".join(ln["buf"])).strip())
+        spaced = re.sub("अ([ाोौ])", lambda m: JOIN_A[m.group(1)], spaced)
         out.append({
             "page": ln["page"],
             "image": ms["image_name"](ln["page"]),
