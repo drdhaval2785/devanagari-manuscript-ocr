@@ -87,6 +87,26 @@ lines' text changed. The validation (25) and test (19) pages are the same as bef
 rows pair on 14 more train pages than when they were first aligned (236; the row finder has changed since), the U-Net's
 on the same 238.
 
+### Error rates: CER and GER
+
+CER (character error rate) counts the edits that turn a reading into the truth per 100 characters of the truth; GER
+(grapheme error rate) counts them per 100 akṣaras, an akṣara as Manuscribe's editor counts it (`msocr/aksara.py`: a
+consonant with the consonants joined to it by virama, its vowel sign and marks; a vowel with its marks; any other sign
+with the marks after it), so that an akṣara read wrong in any part is one error, however many characters it has.
+`recognizer test`, the end of `finetune` and of `pool` (a table of each manuscript's CER and GER before and with the
+model kept; `history.csv` has a GER column for each manuscript, `best.pt` its `val_ger`), `compare` and `pagediff` give
+both; the best model is still chosen by CER. Measured 2026-11-25 (an akṣara holds 1.8-2.2 characters here; GER runs at
+1.2-2.0 times CER):
+
+| manuscript | scored on | ft6 CER | ft6 GER | pool1 CER | pool1 GER |
+|---|---|---:|---:|---:|---:|
+| LDII_1806 | held-out page | 14.19 | 21.31 | 5.08 | 7.50 |
+| LDII_19634 | held-out page | 4.80 | 6.45 | 4.41 | 5.38 |
+| LDII_45364 | held-out page | 4.48 | 6.22 | 3.41 | 4.67 |
+| LDII_82668 | held-out page | 13.32 | 20.24 | 2.92 | 5.74 |
+| LDII_9851 | held-out page | 9.86 | 16.51 | 5.24 | 8.25 |
+| LDII_85885 | 19 test pages (the editor's transcription) | 2.24 | 3.66 | 2.48 | 4.08 |
+
 ## Reading a new manuscript and adapting the model to its hand
 
 | Step | Command | What it does |

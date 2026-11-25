@@ -128,40 +128,12 @@ def short_name(path):
 
 # ------------------------------------------------------------------ akṣaras and their alignment
 
+from .aksara import MARK, VIRAMA, aksharas, errors as aksara_errors   # noqa: E402  (one akṣara for all of msocr)
+
 R = lambda a, b: {chr(c) for c in range(a, b + 1)}                       # noqa: E731
-CONS = R(0x915, 0x939) | R(0x958, 0x95F) | R(0x978, 0x97F)
-MARK = R(0x900, 0x903) | R(0x93A, 0x93C) | R(0x93E, 0x94C) | R(0x94E, 0x94F) | R(0x951, 0x957) | R(0x962, 0x963) \
-    | R(0x1CD0, 0x1CFF) | R(0xA8E0, 0xA8F1)
-VIRAMA, NUKTA, JOIN = "्", "़", {"‌", "‍"}
 MATRA = R(0x93E, 0x94C) | R(0x962, 0x963)
 DIGIT = {chr(0x966 + k): k for k in range(10)}
 PUNCT = set("।॥") | set(DIGIT) | set("0123456789.,-|")
-
-
-def aksharas(s):
-    """a line split into akṣaras: a consonant with its conjoined consonants, vowel signs and marks; a vowel with its
-    marks; anything else one character at a time"""
-    out, i, n = [], 0, len(s)
-    while i < n:
-        j = i + 1
-        if s[i] in CONS:
-            while True:
-                while j < n and s[j] == NUKTA:
-                    j += 1
-                if j < n and s[j] == VIRAMA:
-                    k = j + 1
-                    while k < n and s[k] in JOIN:
-                        k += 1
-                    if k < n and s[k] in CONS:
-                        j = k + 1
-                        continue
-                    j = k
-                break
-        while j < n and (s[j] in MARK or s[j] == VIRAMA):
-            j += 1
-        out.append(s[i:j])
-        i = j
-    return out
 
 
 def align(truth, read):
@@ -398,6 +370,7 @@ def page_result(ms, image, pdf_page, gt_path, seg, model, other):
         if ln.get("truth") and "read" in ln:
             ln["a"], ln["b"], ln["ops"] = align(ln["truth"], ln["read"])
             ln["dist"], ln["len"] = Levenshtein.distance(ln["read"], ln["truth"]), len(ln["truth"])
+            ln["adist"], ln["alen"] = aksara_errors(ln["read"], ln["truth"])
             ln["cer"] = 100 * ln["dist"] / ln["len"]
             if other:
                 ln["dist_o"] = Levenshtein.distance(ln["other"], ln["truth"])
@@ -418,11 +391,14 @@ def page_result(ms, image, pdf_page, gt_path, seg, model, other):
     res = {"ms": ms, "image": image, "stem": stem, "pdf_page": pdf_page, "gt": str(gt_path), "size": size, "note": note,
            "warn": warn, "problems": problems, "lines": lines, "rects": rects, "kinds": dict(errors),
            "cer": 100 * sum(ln["dist"] for ln in scored) / max(1, chars_), "chars": chars_, "n_scored": len(scored),
+           "ger": 100 * sum(ln["adist"] for ln in scored) / max(1, sum(ln["alen"] for ln in scored)),
+           "aksaras": sum(ln["alen"] for ln in scored),
            "unpaired_rows": sum(1 for ln in lines if "read" in ln and not ln.get("truth") and ln.get("line") is None),
            "unpaired_lines": [ln for ln in lines if ln.get("truth") and "read" not in ln],
            "ink": ink_errors(net, chars, lines), "not_text": stem in not_text(ms)}
     if other:
         res["cer_o"] = 100 * sum(ln["dist_o"] for ln in scored) / max(1, chars_)
+        res["ger_o"] = 100 * sum(aksara_errors(ln["other"], ln["truth"])[0] for ln in scored) / max(1, res["aksaras"])
         res["ink_o"] = ink_errors(other[0], other[1], lines)
     return res
 
@@ -499,7 +475,8 @@ def page_html(results, meta):
 <a class="card" href="#{pid}">
   <div class="card-head"><span class="ms">{esc(p['ms'])} · PDF page {p['pdf_page']}</span><span class="pg">folio {folio}, side {esc(side)}</span></div>
   <div class="big">{before}<span class="now">{p['cer']:.2f}<small>% CER{' · ' + esc(name) if oname else ''}</small></span></div>
-  <div class="sub">{p['n_scored']} lines scored · {p['chars']} characters · {errs} akṣaras read wrong, missed or added</div>
+  <div class="ger">{(f'<span class="was">{p["ger_o"]:.2f}</span><span class="arrow">→</span>' if oname else '')}<b>{p['ger']:.2f}</b><small>% GER, in akṣaras</small></div>
+  <div class="sub">{p['n_scored']} lines scored · {p['chars']} characters, {p['aksaras']} akṣaras · {errs} akṣaras read wrong, missed or added</div>
   <div class="bar">{bar}</div>
   <ul class="legend">{legend}</ul>
   {ink_line}{warn}
@@ -533,8 +510,8 @@ def page_html(results, meta):
                               f'{esc(c["t"]) or "∅"}<i>→</i>{esc(c["r"]) or "∅"}</span>' for c in ln["changes"])
                 other = (f'<div class="txt oth"><span class="lab">{esc(oname)}</span><span class="deva">{esc(ln["other"])}</span></div>'
                          if oname else "")
-                head = (f'<span class="pill {t_}">{ln["cer"]:.1f} %</span><span class="dim">{ln["dist"]} of {ln["len"]} characters · '
-                        f'confidence {ln["conf"]:.0f}' + (f' · {esc(oname)} {100 * ln["dist_o"] / ln["len"]:.1f} %' if oname else "") + "</span>")
+                head = (f'<span class="pill {t_}">{ln["cer"]:.1f} %</span><span class="dim">{ln["dist"]} of {ln["len"]} characters, '
+                        f'{ln["adist"]} of {ln["alen"]} akṣaras · confidence {ln["conf"]:.0f}' + (f' · {esc(oname)} {100 * ln["dist_o"] / ln["len"]:.1f} %' if oname else "") + "</span>")
                 body = (f'<div class="txt"><span class="lab">truth</span><span class="deva">{t}</span></div>'
                         f'<div class="txt"><span class="lab">{esc(name)}</span><span class="deva">{r}</span></div>{other}'
                         + (f'<div class="chgs">{ch}</div>' if ch else ""))
@@ -555,7 +532,7 @@ def page_html(results, meta):
         rowwarn = f'<p class="warnbox">Row finder: {esc(p["warn"])}</p>' if p["warn"] else ""
         sections.append(f"""
 <section class="pg-sec" id="{pid}">
-  <h2>{esc(p['ms'])} · PDF page {p['pdf_page']} <span class="dim">· {esc(p['stem'])} · {p['cer']:.2f} % CER{f" ({esc(oname)} {p['cer_o']:.2f} %)" if oname else ""}</span></h2>
+  <h2>{esc(p['ms'])} · PDF page {p['pdf_page']} <span class="dim">· {esc(p['stem'])} · {p['cer']:.2f} % CER, {p['ger']:.2f} % GER{f" ({esc(oname)} {p['cer_o']:.2f} %, {p['ger_o']:.2f} %)" if oname else ""}</span></h2>
   <p class="dim small">Rows from {esc(meta['seg'])}: {esc(p['note'] or '')}. Ground truth: {esc(p['gt'])}. Each outline is the band
   cut out and read; click one to go to its line.</p>{rowwarn}
   <figure class="page"><div class="pagewrap" style="aspect-ratio:{w}/{h}">
@@ -609,6 +586,7 @@ h1{font-size:26px;margin:0 0 4px} h2{font-size:20px;margin:40px 0 6px} h3{font-s
 .card-head{display:flex;justify-content:space-between;gap:8px;font-weight:600}.pg{color:var(--dim);font-weight:400}
 .big{font-size:30px;font-weight:650;margin:6px 0 2px;font-variant-numeric:tabular-nums}.was{color:var(--dim);font-size:20px;text-decoration:line-through}
 .arrow{color:var(--dim);font-size:18px;margin:0 6px}.big small{font-size:13px;color:var(--dim);font-weight:400;margin-left:4px}
+.ger{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;margin:0 0 2px}.ger .was{font-size:14px}.ger small{font-size:12.5px;color:var(--dim);font-weight:400;margin-left:4px}
 .sub{font-size:13px;color:var(--dim);margin:4px 0}.sub b{color:var(--ink)}.warnline{color:var(--poor)}.redink{color:#c0392b !important}
 .bar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:10px 0 6px;gap:2px}.seg{display:block}
 .k-letters{background:var(--k-letters)}.k-marks{background:var(--k-marks)}.k-edge{background:var(--k-edge)}.k-punct{background:var(--k-punct)}
@@ -665,7 +643,8 @@ body.only-errors .line.clean{display:none}
 <p><mark class="d-sub">orange</mark> read as something else · <mark class="d-miss">red</mark> in the truth but not read ·
 <mark class="d-extra">blue</mark> read but not in the truth · <span class="gap"></span> where the other line has the missing or
 extra akṣara. Hover over a marked akṣara or a change to see its partner. Spaces are taken out of both before comparing,
-as in training; CER is edits per 100 characters of the truth.</p>
+as in training; CER is edits per 100 characters of the truth, GER per 100 akṣaras (an akṣara read wrong in any part
+is one error; msocr/aksara.py).</p>
 <p>Kinds: <b>letters</b>, a different consonant or conjunct; <b>vowel sign / anusvāra</b>, the same consonants with other
 marks; <b>first or last akṣara</b>, an error at either end of a line, where a crop may cut into the letters;
 <b>daṇḍa or numeral</b>.</p>
@@ -738,6 +717,7 @@ def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False
         results.append(r)
         extra = f" ({oname} {r['cer_o']:.2f} %)" if other else ""
         unp = f"; {r['unpaired_rows']} rows and {len(r['unpaired_lines'])} lines unpaired" if r["problems"] else ""
+        extra += f", GER {r['ger']:.2f} %" + (f" ({oname} {r['ger_o']:.2f} %)" if other else "")
         print(f"[pagediff] {ms} PDF page {n} = {image[:-4]}: {r['cer']:.2f} % CER{extra} over {r['n_scored']} lines{unp}; "
               f"{sum(len(ln['hints']) for ln in r['lines'])} hints for the truth")
     meta = {"ms": ms, "seg": seg, "model": name, "model_label": model_label(mp, ck), "other": oname,

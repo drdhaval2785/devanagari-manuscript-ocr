@@ -57,6 +57,7 @@ import torch.nn as nn
 from PIL import Image
 from rapidfuzz.distance import Levenshtein
 
+from .aksara import ger
 from .chunks import split_text
 from .config import ms_dir
 
@@ -534,6 +535,7 @@ def finetune(ms_id, base, run="ft1", passes=30, lrate=3e-4, holdout=1, mix=3, ba
     print(f"  old lines mixed in each pass : {mix} per new line, drawn from {len(old_train):,} lines of {base_ms}")
     print(f"  new characters   : {' '.join(added) if added else 'none'}")
     cer_new, pairs = evaluate(net, new_test, chars)
+    ger_new = ger(pairs)
     cer_old, _ = evaluate(net, old_val, chars)
     print(f"  learning rate {lrate}, halved after 3 passes without gain; stops after 8 passes without gain or {passes} passes\n")
     print(f"  pass | loss/char | CER % on new hand | change  | CER % on old hand | verdict")
@@ -541,8 +543,8 @@ def finetune(ms_id, base, run="ft1", passes=30, lrate=3e-4, holdout=1, mix=3, ba
     print(f"     0 |     -     | {cer_new:17.2f} |    -    | {cer_old:17.2f} | before fine-tuning")
     for pred, truth, _ in pairs[:2]:
         print(f"         truth: {truth[:64]}\n         model: {pred[:64]}")
-    history = [{"pass": 0, "loss_per_char": "", "cer_new": round(cer_new, 3), "cer_old": round(cer_old, 3)}]
-    best, best_ep, start = cer_new, 0, cer_new
+    history = [{"pass": 0, "loss_per_char": "", "cer_new": round(cer_new, 3), "ger_new": round(ger_new, 3), "cer_old": round(cer_old, 3)}]
+    best, best_ep, start, start_ger, best_ger = cer_new, 0, cer_new, ger_new, ger_new
     for ep in range(1, passes + 1):
         samples = new_train + rng.sample(old_train, min(len(old_train), mix * len(new_train)))
         net.train()
@@ -561,10 +563,11 @@ def finetune(ms_id, base, run="ft1", passes=30, lrate=3e-4, holdout=1, mix=3, ba
             tot_chars += int(tl.sum())
         prev = cer_new
         cer_new, pairs = evaluate(net, new_test, chars)
+        ger_new = ger(pairs)
         cer_old, _ = evaluate(net, old_val, chars)
         if cer_new < best:
-            best, best_ep = cer_new, ep
-            torch.save({"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": cer_new, "lines": seg}, run_dir / "best.pt")
+            best, best_ep, best_ger = cer_new, ep, ger_new
+            torch.save({"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": cer_new, "val_ger": ger_new, "lines": seg}, run_dir / "best.pt")
         verdict = "new best" if best_ep == ep else f"no gain for {ep - best_ep} pass(es)"
         if best_ep != ep and (ep - best_ep) % 3 == 0:
             for g in opt.param_groups:
@@ -575,7 +578,7 @@ def finetune(ms_id, base, run="ft1", passes=30, lrate=3e-4, holdout=1, mix=3, ba
             for pred, truth, _ in pairs[:2]:
                 print(f"         truth: {truth[:64]}\n         model: {pred[:64]}")
             print(f"         commonest mistakes: {confusions(pairs)}")
-        history.append({"pass": ep, "loss_per_char": round(tot_loss / tot_chars, 4), "cer_new": round(cer_new, 3), "cer_old": round(cer_old, 3)})
+        history.append({"pass": ep, "loss_per_char": round(tot_loss / tot_chars, 4), "cer_new": round(cer_new, 3), "ger_new": round(ger_new, 3), "cer_old": round(cer_old, 3)})
         with open(run_dir / "history.csv", "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(history[0].keys()))
             w.writeheader()
@@ -584,7 +587,7 @@ def finetune(ms_id, base, run="ft1", passes=30, lrate=3e-4, holdout=1, mix=3, ba
             print("  no gain for 8 passes: stopping")
             break
     print(f"\n[finetune] CER on the held-out page of {ms_id}: {start:.2f}% before -> {best:.2f}% after (pass {best_ep}), "
-          f"from {len(new_train)} corrected lines.")
+          f"from {len(new_train)} corrected lines; GER (akṣaras) {start_ger:.2f}% -> {best_ger:.2f}%.")
     print(f"  model: {run_dir / 'best.pt'}" if best_ep else "  no improvement; no model saved")
     return history
 
@@ -746,12 +749,20 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
     print(f"  pass | loss/char | mean  | own   | " + " | ".join(f"{n:>6}" for n in short) + " | min  | verdict")
     print(f"  -----+-----------+-------+-------+-" + "-+-".join("-" * 6 for _ in short) + "-+------+---------------")
 
+    gers = []          # GER per manuscript of the last score(), beside its CER
+
     def score():
-        cers = [evaluate(net, sc, chars)[0] if sc else float("nan") for _, _, _, sc in sources]
+        ev = [evaluate(net, sc, chars) if sc else (float("nan"), []) for _, _, _, sc in sources]
+        cers = [c for c, _ in ev]
+        gers[:] = [ger(pr) if pr else float("nan") for _, pr in ev]
         scored = [c for c, f in zip(cers, sources) if f[2] and f[3]]
         own = [c for c, f in zip(cers, sources) if f[2] and f[3] and f[1] != "contributed"]
         mean = sum(scored) / len(scored)
         return mean, (sum(own) / len(own) if own else mean), cers
+
+    def mean_ger():
+        g = [x for x, f in zip(gers, sources) if f[2] and f[3]]
+        return sum(g) / len(g)
 
     def line(ep, loss, mean, own, cers, minutes, verdict):
         print(f"  {ep:4d} | {loss:>9} | {mean:5.2f} | {own:5.2f} | " + " | ".join(f"{c:6.2f}" for c in cers) + f" | {minutes:4.1f} | {verdict}")
@@ -760,7 +771,8 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
     mean, own, cers = score()
     own0 = own
     line(0, "-", mean, own, cers, (time.time() - t) / 60, "before")
-    history.append({"pass": 0, "loss_per_char": "", "mean_cer": round(mean, 3), "own_cer": round(own, 3), **{f[0]: round(c, 3) for f, c in zip(sources, cers)}, "minutes": 0})
+    history.append({"pass": 0, "loss_per_char": "", "mean_cer": round(mean, 3), "own_cer": round(own, 3), **{f[0]: round(c, 3) for f, c in zip(sources, cers)},
+                    "mean_ger": round(mean_ger(), 3), **{f"{f[0]} GER": round(g, 3) for f, g in zip(sources, gers)}, "minutes": 0})
     best, best_ep, flat = mean, 0, 0
     for ep in range(1, passes + 1):
         t_ep = time.time()
@@ -783,7 +795,7 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
             tot_loss += loss.item()
             tot_chars += int(tl.sum())
         mean, own, cers = score()
-        state = {"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": mean, "own_cer": own, "lines": seg,
+        state = {"state": net.state_dict(), "chars": chars, "height": HEIGHT, "pass": ep, "val_cer": mean, "val_ger": mean_ger(), "own_cer": own, "lines": seg,
                  "sources": [f[0] for f in training], "contributions": packages}
         if mean < best and own <= own0 + OWN_GUARD:
             best, best_ep, flat = mean, ep, 0
@@ -799,7 +811,9 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
         torch.save(state, run_dir / "last.pt")
         line(ep, f"{tot_loss / tot_chars:.3f}", mean, own, cers, (time.time() - t_ep) / 60, verdict)
         history.append({"pass": ep, "loss_per_char": round(tot_loss / tot_chars, 4), "mean_cer": round(mean, 3), "own_cer": round(own, 3),
-                        **{f[0]: round(c, 3) for f, c in zip(sources, cers)}, "minutes": round((time.time() - t_ep) / 60, 2)})
+                        **{f[0]: round(c, 3) for f, c in zip(sources, cers)},
+                        "mean_ger": round(mean_ger(), 3), **{f"{f[0]} GER": round(g, 3) for f, g in zip(sources, gers)},
+                        "minutes": round((time.time() - t_ep) / 60, 2)})
         with open(run_dir / "history.csv", "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(history[0].keys()))
             w.writeheader()
@@ -810,6 +824,12 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
     print(f"\n[pool] mean CER over the {len([f for f in training if f[3]])} manuscripts scored: {history[0]['mean_cer']:.2f}% before -> {best:.2f}% after (pass {best_ep})"
           + (f"; {len(packages)} contributed package(s) in it" if packages and best_ep else ""))
     print(f"  model: {run_dir / 'best.pt'}" if best_ep else "  no improvement; no model saved")
+    if best_ep:         # CER and GER of each manuscript, before and with the model kept
+        h0, hb = history[0], history[best_ep]
+        print(f"  mean GER (akṣaras): {h0['mean_ger']:.2f}% before -> {hb['mean_ger']:.2f}% after")
+        print(f"  {'manuscript':<22} {'CER before':>10} {'after':>7}   {'GER before':>10} {'after':>7}")
+        for f in sources:
+            print(f"  {f[0]:<22} {h0[f[0]]:>10.2f} {hb[f[0]]:>7.2f}   {h0[f[0] + ' GER']:>10.2f} {hb[f[0] + ' GER']:>7.2f}")
     return history
 
 
@@ -823,6 +843,7 @@ def test(ms_id, run="run1", show=5, model=None, seg="seg"):
     print(f"[test] {ms_id} {'model ' + str(model) if model else 'run ' + repr(run)} (from pass {ck['pass']}, validation CER {ck['val_cer']:.2f}%)")
     print(f"  test lines : {len(lines)} from {len({s[2].rsplit(chr(95), 1)[0] for s in lines})} held-out pages ({seg})")
     print(f"  test CER   : {cer:.2f}%")
+    print(f"  test GER   : {ger(pairs):.2f}%  (akṣaras, msocr/aksara.py)")
     print(f"  per line   : median {per_line[len(per_line) // 2]:.1f}%, best {per_line[0]:.1f}%, worst {per_line[-1]:.1f}%")
     print(f"  commonest mistakes: {confusions(pairs, 12)}")
     for pred, truth, name in pairs[:show]:
