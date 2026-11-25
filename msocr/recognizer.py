@@ -833,17 +833,27 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
     return history
 
 
-def test(ms_id, run="run1", show=5, model=None, seg="seg"):
+def test(ms_id, run="run1", show=5, model=None, seg="seg", lm=None):
     """Final score on the held-out test pages, which training never touched. `model` scores another model's file; seg
-    the test lines of which segmentation (lines/ or lines_<seg>/)."""
+    the test lines of which segmentation (lines/ or lines_<seg>/); lm a language model (lm.load_default: the newest
+    build unless 'none'), with which the lines are read a second time, as predict and Manuscribe read them."""
+    from .lm import load_default
     net, chars, ck = load_model(Path(model) if model else ms_dir(ms_id) / "models" / run / "best.pt")
     lines = load_split(ms_id, "test", seg=seg)
     cer, pairs = evaluate(net, lines, chars)
+    mix = load_default(lm)
+    if mix is not None:
+        from . import lm as L
+        with torch.no_grad():
+            lm_pairs = [(L.decode(net(x[None, None])[0].numpy(), chars, mix)[0], t, n) for x, t, n in lines]
+        lm_cer = 100.0 * sum(Levenshtein.distance(p, t) for p, t, _ in lm_pairs) / max(1, sum(len(t) for _, t, _ in lm_pairs))
     per_line = sorted(100 * Levenshtein.distance(p, t) / len(t) for p, t, _ in pairs)
     print(f"[test] {ms_id} {'model ' + str(model) if model else 'run ' + repr(run)} (from pass {ck['pass']}, validation CER {ck['val_cer']:.2f}%)")
     print(f"  test lines : {len(lines)} from {len({s[2].rsplit(chr(95), 1)[0] for s in lines})} held-out pages ({seg})")
     print(f"  test CER   : {cer:.2f}%")
     print(f"  test GER   : {ger(pairs):.2f}%  (akṣaras, msocr/aksara.py)")
+    if mix is not None:
+        print(f"  with the language model ({', '.join(f'{l.name} {w:.1f}' for l, w in mix.parts)}): CER {lm_cer:.2f}%, GER {ger(lm_pairs):.2f}%  (as predict and Manuscribe read)")
     print(f"  per line   : median {per_line[len(per_line) // 2]:.1f}%, best {per_line[0]:.1f}%, worst {per_line[-1]:.1f}%")
     print(f"  commonest mistakes: {confusions(pairs, 12)}")
     for pred, truth, name in pairs[:show]:
@@ -857,6 +867,7 @@ if __name__ == "__main__":
     ap.add_argument("--base", default=str(ms_dir("LDII_85885") / "models" / "run3" / "best.pt"), help="model to fine-tune from")
     ap.add_argument("--passes", type=int, default=30)
     ap.add_argument("--holdout", type=int, default=1, help="corrected pages kept back for scoring")
+    ap.add_argument("--lm", help="test: a language model build (default the newest under data/lm), or 'none'")
     ap.add_argument("ms_id", nargs="*", help="the manuscript; for pool, the manuscripts to use (default: every one with training text)")
     ap.add_argument("--per-pass", type=int, default=3000, help="pool: lines per pass, shared equally between the manuscripts")
     ap.add_argument("--exclude", nargs="*", default=(), help="pool: manuscripts kept out of training and scored as unseen hands")
@@ -884,4 +895,4 @@ if __name__ == "__main__":
     elif a.command == "recut":
         recut_corrected(a.ms_id[0], a.seg if a.seg != "seg" else "seg_torch")
     else:
-        test(a.ms_id[0], a.run, model=a.model, seg=a.seg)
+        test(a.ms_id[0], a.run, model=a.model, seg=a.seg, lm=a.lm)

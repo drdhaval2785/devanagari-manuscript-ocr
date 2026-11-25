@@ -45,10 +45,16 @@ from .segment import cut_from, ensure_segmented, page_seg, pin, reading_from
 DEFAULT_MODEL = DATA / "LDII_85885" / "models" / "run3" / "best.pt"
 
 
-def read_line(net, chars, crop):
+def read_line(net, chars, crop, lm=None):
+    """-> (text, confidence in %): greedy, or with the language model (msocr/lm.py) when one is given"""
     x = to_tensor(crop)[None, None]
     with torch.no_grad():
-        probs = net(x)[0].softmax(-1)
+        logits = net(x)[0]
+    if lm is not None:
+        from . import lm as L
+        text, conf, _ = L.decode(logits.numpy(), chars, lm)
+        return text, conf
+    probs = logits.softmax(-1)
     best, idx = probs.max(-1)
     out, conf, prev = [], [], 0
     for p, v in zip(best.tolist(), idx.tolist()):
@@ -102,7 +108,7 @@ def model_label(path, ck):
 CUTTER = os.environ.get("MSOCR_CUTTER", "own")   # "own": msocr/linecut.py (default since 2026-11-24); "kraken": extract_polygons
 
 
-def _read_rows(ms_id, image, size, merged, net, chars, lines_dir, stem, box):
+def _read_rows(ms_id, image, size, merged, net, chars, lines_dir, stem, box, lm=None):
     """Cut the rows (baseline, outline) out of the page and read them. -> [{file, text, conf}]"""
     if CUTTER == "own":
         from .linecut import band_of, cut_line
@@ -114,7 +120,7 @@ def _read_rows(ms_id, image, size, merged, net, chars, lines_dir, stem, box):
             name = pagetext.image_name(stem, box, li)
             if lines_dir:
                 crop.save(lines_dir / name)
-            text, conf = read_line(net, chars, crop)
+            text, conf = read_line(net, chars, crop, lm)
             lines.append({"file": name, "text": text, "conf": conf})
         return lines
     from kraken.lib.segmentation import extract_polygons
@@ -131,12 +137,12 @@ def _read_rows(ms_id, image, size, merged, net, chars, lines_dir, stem, box):
         name = pagetext.image_name(stem, box, li)
         if lines_dir:
             crop.save(lines_dir / name)
-        text, conf = read_line(net, chars, crop)
+        text, conf = read_line(net, chars, crop, lm)
         lines.append({"file": name, "text": text, "conf": conf})
     return lines
 
 
-def read_page(ms_id, image, net, chars, lines_dir=None):
+def read_page(ms_id, image, net, chars, lines_dir=None, lm=None):
     """Cut a page into its rows, block by block on a tripāṭha or pañcapāṭha page, and read them.
     -> ({box: [{file, text, conf}]}, the row finder's note, its warning); {} when no rows were found.
     With lines_dir the crops are saved there as <page>_NN.png (main text) or <page>_<box>_NN.png,
@@ -151,14 +157,14 @@ def read_page(ms_id, image, net, chars, lines_dir=None):
         for box, b in blocks.items():
             if not b["rows"]:
                 continue
-            boxes[box] = _read_rows(ms_id, image, size, b["rows"], net, chars, lines_dir, stem, box)
+            boxes[box] = _read_rows(ms_id, image, size, b["rows"], net, chars, lines_dir, stem, box, lm)
             if b["warn"]:
                 warns.append(f"{box}: {b['warn']}")
         return boxes, note, ("; ".join(warns) or None) if boxes else "no blocks found"
     merged, size, note, warn = rows_for_page(ms_id, image)
     if not merged:
         return {}, note, warn
-    return {"main": _read_rows(ms_id, image, size, merged, net, chars, lines_dir, stem, "main")}, note, warn
+    return {"main": _read_rows(ms_id, image, size, merged, net, chars, lines_dir, stem, "main", lm)}, note, warn
 
 
 def _review_html(ms_id, stem, boxes, warn):
@@ -198,7 +204,8 @@ function save(){{
 </script></body></html>"""
 
 
-def predict(ms_id, images, model=DEFAULT_MODEL, verbose=True, write_to_correct=True):
+def predict(ms_id, images, model=DEFAULT_MODEL, verbose=True, write_to_correct=True, lm=None):
+    """lm: a language model as lm.load_default gives it (the newest build by default; None reads greedily)"""
     warnings.filterwarnings("ignore")
     d = ms_dir(ms_id)
     skip = not_text(ms_id)
@@ -216,7 +223,8 @@ def predict(ms_id, images, model=DEFAULT_MODEL, verbose=True, write_to_correct=T
         ensure_segmented(ms_id, [i for i in images if segs[i] == seg], seg)
     net, chars, ck = load_model(model)
     print(f"[predict] {ms_id}: {len(images)} pages with model {model_label(model, ck)} on its own manuscript; lines from "
-          + ", ".join(f"{s} on {sum(1 for v in segs.values() if v == s)}" for s in sorted(set(segs.values()))))
+          + ", ".join(f"{s} on {sum(1 for v in segs.values() if v == s)}" for s in sorted(set(segs.values())))
+          + ("; read with the language model " + ", ".join(f"{l.name} {w:.1f}" for l, w in lm.parts) if lm else "; read greedily, no language model"))
     summary = []
     for image in images:
         stem = image.rsplit(".", 1)[0]
@@ -225,7 +233,7 @@ def predict(ms_id, images, model=DEFAULT_MODEL, verbose=True, write_to_correct=T
             for f in (d / "lines" / "pred").glob(f"{stem}_*.png"):
                 f.unlink()
         with reading_from(seg):
-            boxes, note, warn = read_page(ms_id, image, net, chars, d / "lines" / "pred")
+            boxes, note, warn = read_page(ms_id, image, net, chars, d / "lines" / "pred", lm)
         if boxes:
             pin(ms_id, stem, seg)
         if not boxes:
@@ -263,5 +271,7 @@ if __name__ == "__main__":
     ap.add_argument("--start", type=int, default=1, help="index of the first page image (0 is usually the cover)")
     ap.add_argument("--pages", type=int, default=10)
     ap.add_argument("--model", default=str(DEFAULT_MODEL))
+    ap.add_argument("--lm", help="a language model build (data/lm/<build>; default the newest), or 'none' to read greedily")
     a = ap.parse_args()
-    predict(a.ms_id, page_list(a.ms_id, a.start, a.pages), Path(a.model))
+    from .lm import load_default
+    predict(a.ms_id, page_list(a.ms_id, a.start, a.pages), Path(a.model), lm=load_default(a.lm))

@@ -15,6 +15,7 @@ that the JavaScript port can be checked stage by stage against it (Manuscribe's 
      07_rec_input_<box>_<k>.png  resized for the recogniser, before inversion   within 1 grey level
      08_logits_<box>_<k>.f32     t x classes float32                            within 1e-3
      09_text.json        {box: [{"text", "conf"}]}                              identical text
+                         (read with the pack's language model where it has one, as Manuscribe reads)
      10_spaced.json      {box: the block's lines joined with no separator, spaced}   identical
 The private pages (the developer's manuscripts) stay in data/; --synthetic adds a page of printed Devanagari drawn
 here, which may go anywhere.
@@ -74,7 +75,7 @@ def save_png(path, arr):
     Image.fromarray(arr).save(path, optimize=False)
 
 
-def make(out, page, layout, seg_f, rec_f, chars, spacer_net, threshold, about):
+def make(out, page, layout, seg_f, rec_f, chars, spacer_net, threshold, about, lm=None):
     out.mkdir(parents=True, exist_ok=True)
     files = {}
     save_png(out / "00_page.png", page)
@@ -104,7 +105,7 @@ def make(out, page, layout, seg_f, rec_f, chars, spacer_net, threshold, about):
             logits = rec_f(xi)[0]
             logits.astype("<f4").tofile(out / f"08_logits_{box}_{k:02d}.f32")
             files[f"08_logits_{box}_{k:02d}.f32"] = {"shape": list(logits.shape), "dtype": "float32"}
-            t, c = R.decode(logits, chars)
+            t, c = R.decode_lm(logits, chars, lm) if lm else R.decode(logits, chars)
             text[box].append({"text": t, "conf": round(c, 3)})
         spaced[box] = SR.space_text("".join(l["text"] for l in text[box]), spacer_net, threshold)
     json.dump(text, open(out / "09_text.json", "w", encoding="utf-8"), ensure_ascii=False, indent=0)
@@ -130,22 +131,25 @@ def main():
     import spacer_reference as SR
     spacer_net = SR.onnx_network(os.path.join(pack, "spacer.onnx"))
     threshold = manifest["models"]["spacer"]["threshold"]
+    from .lm import load_manifest
+    lm = load_manifest(pack, manifest)
+    print(f"[fixtures] pack {manifest['pack']}: " + (f"lines read with its language model ({', '.join(c['name'] for c in manifest['lm']['components'])})" if lm else "no language model, lines read greedily"))
     root = DATA / "fixtures" / manifest["pack"]
     index = []
     for p in a.pages:
         ms, stem = p.split(":")
         page = np.asarray(Image.open(MANUSCRIPTS[ms]["images"] / f"{stem}.jpg").convert("RGB"))
         meta = make(root / stem, page, layout_of(ms), seg_f, rec_f, chars, spacer_net, threshold,
-                    {"page": stem, "manuscript": ms, "pack": manifest["pack"], "private": True})
+                    {"page": stem, "manuscript": ms, "pack": manifest["pack"], "private": True}, lm)
         index.append({"page": stem, "dir": stem, "layout": meta["layout"], "rows": meta["rows"], "private": True})
         print(f"  {ms} {stem}: {meta['layout']}, rows {meta['rows']}", flush=True)
     if a.synthetic:
         meta = make(root / "synthetic_1", synthetic_page(), "linear", seg_f, rec_f, chars, spacer_net, threshold,
-                    {"page": "synthetic_1", "manuscript": None, "pack": manifest["pack"], "private": False})
+                    {"page": "synthetic_1", "manuscript": None, "pack": manifest["pack"], "private": False}, lm)
         index.append({"page": "synthetic_1", "dir": "synthetic_1", "layout": "linear", "rows": meta["rows"], "private": False})
         print(f"  synthetic page: rows {meta['rows']}", flush=True)
     json.dump({"pack": manifest["pack"], "pipeline_version": manifest["pipeline_version"], "spacer_version": manifest["spacer_version"],
-               "tolerance": TOL, "pages": index}, open(root / "index.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+               "lm": bool(lm), "tolerance": TOL, "pages": index}, open(root / "index.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"[fixtures] {len(index)} pages: {root}")
 
 

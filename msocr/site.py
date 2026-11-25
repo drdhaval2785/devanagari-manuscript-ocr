@@ -161,7 +161,24 @@ def _card_md(m):
                      + (", cut from the U-Net's segmentation as Manuscribe cuts them" if s.get("lines_from") == "seg_torch" else ""))
     lines += ["", "It reads the hands it learned from well and other hands poorly: a model pooled over many hands is "
               "to replace it.", "", "## Word spacer", "", f"Run `{sp['run']}`, trained on {sp['texts']}. Threshold "
-              f"{m['models']['spacer']['threshold']}.", "", "## Consent", ""]
+              f"{m['models']['spacer']['threshold']}.", ""]
+    lm = m.get("lm")
+    if lm:
+        d = lm["decoding"]
+        lines += ["## Language model", "",
+                  f"Lines are read with a character {lm['order']}-gram language model: a prefix beam search over the recogniser's "
+                  f"probabilities, each reading weighed by how its letters run in Sanskrit (alpha {d['alpha']}, beta {d['beta']}, "
+                  f"beam {d['beam']}). Daṇḍas, digits and marks are one boundary symbol to it. Its parts, mixed by weight:", ""]
+        for c in lm["components"]:
+            what = (f"the lexica texts ({c.get('files', '?')} works in IAST, {c['lines']:,} sentences)" if c["name"] == "lexica"
+                    else "the manuscripts' own transcriptions (" + ", ".join(f"{s['manuscript']} {s['lines']}" for s in c.get("sources", [])) + " lines)")
+            lines.append(f"- `{c['name']}` (weight {c['weight']}): {c['letters']:,} letters of {what}; {c['entries']:,} n-grams"
+                         + (f", those seen under {c['pruned_below']} times left out" if c.get("pruned_below", 1) > 1 else "") + f"; {c['bytes'] / 1e6:.1f} MB.")
+        lines += ["", "Measured on lines never trained on (2026-11-25): about a sixth fewer character errors and a fifth fewer "
+                  "akṣara errors than reading letter by letter; daṇḍas and digits are not its business.", ""]
+    else:
+        lines += ["## Language model", "", "None in this pack: lines are read letter by letter, as the recogniser sees them.", ""]
+    lines += ["## Consent", ""]
     if seg.get("contributions"):
         lines += ["The segmenter learned also from folio sides contributed from Manuscribe, each manuscript's given by its editor "
                   "with consent, and used only where its lines as the segmenter found them bore out its editor's line counts "
@@ -195,12 +212,17 @@ def add_pack(pack_dir, site):
     for name, h in m["files"].items():
         if sha256(pack_dir / name) != (h if isinstance(h, str) else h["sha256"]):
             raise SystemExit(f"{pack_dir / name}: not the file its manifest names")
+    for c in (m.get("lm") or {}).get("components", []):
+        if sha256(pack_dir / c["file"]) != c["sha256"]:
+            raise SystemExit(f"{pack_dir / c['file']}: not the file its manifest names")
     out = site / "packs" / m["pack"]
     out.mkdir(parents=True, exist_ok=True)
     for mod in m["models"].values():
         shutil.copy2(pack_dir / mod["file"], out / mod["file"])
     for name in m["files"]:
         shutil.copy2(pack_dir / name, out / name)
+    for c in (m.get("lm") or {}).get("components", []):
+        shutil.copy2(pack_dir / c["file"], out / c["file"])
     m["files"] = {name: _entry(out / name) for name in m["files"]}
     m["needs"] = {"runtime": f"onnxruntime-web-{RUNTIME_VERSION}", "pipeline_version": m["pipeline_version"], "spacer_version": m["spacer_version"]}
     cards = _cards(m)

@@ -107,6 +107,39 @@ both; the best model is still chosen by CER. Measured 2026-11-25 (an akṣara ho
 | LDII_9851 | held-out page | 9.86 | 16.51 | 5.24 | 8.25 |
 | LDII_85885 | 19 test pages (the editor's transcription) | 2.24 | 3.66 | 2.48 | 4.08 |
 
+### Reading with the language model (2026-11-25)
+
+Every line is read with a language model since 2026-11-25: `predict`, `pagediff`, `recognizer test`, the stage fixtures
+and Manuscribe all decode the recogniser's probabilities by a prefix beam search in which a reading is weighed by how
+its letters run in Sanskrit (`msocr/lm.py`; in the browser `app/js/recoglm.js`, the same tables and the same search,
+held to the reference by the conformance test). The model is a character 6-gram with absolute discounting over the
+letters of the Devanagari block (daṇḍas, digits and marks are one boundary symbol it neither reads nor judges), in two
+parts mixed 0.7/0.3: `lexica`, from the 115 IAST lexica texts in `../sanskrit-lexica-for-annotation` (16 M letters,
+n-grams seen under 3 times left out: 2.1 M entries, 10 MB), and `own`, from every training line the recogniser learns
+from (the transcribed manuscript's training split, each manuscript's corrected pages but the last, contributed lines;
+0.75 M letters, 5 MB). A hypothesis scores `log P(recogniser) + 0.4 · log P(LM) + 1.0 · letters`, beam 16
+(`pipeline.json`, `"lm"`, version 2; tuned on LDII_85885's validation lines only). Each letter's confidence is the
+recogniser's own probability of it at the column it aligns to.
+
+    .venv/bin/python -m msocr.lm build                    -> data/lm/<today>/ (lexica.bin.gz, own.bin.gz, lm.json); a minute
+    .venv/bin/python -m msocr.lm show                     what the newest build holds
+    .venv/bin/python -m msocr.lm odds अमृत असृत            which the model prefers, and by how much
+    .venv/bin/python -m msocr.predict LDII_45364 --start 1 --pages 20 --model data/pool/models/pool1/best.pt [--lm none]
+
+The newest build under `data/lm/` is used unless `--lm <build>` names another or `--lm none` reads greedily;
+`export_onnx` puts the build's two files in the pack (`manifest.lm`), `msocr.site` carries them to the site and the
+model card, and Manuscribe reads with them from a pack of pipeline version 2 (an older pack reads greedily as before).
+Rebuild the model after correcting pages: the own part is what makes a hand's spellings stick. Measured on lines never
+trained on (`tools/experiments/lm/README.md` has the whole study): pool1 2.81 → 2.40 % CER and 4.52 → 3.58 % GER, ft6
+5.28 → 4.34 % and 8.84 → 6.82 %; letter errors fall by a fifth, daṇḍa and digit errors not at all; a Sanskrit model
+helps the Old Gujarati bālāvabodha (LDII_1806) least and would need a corpus of its own. The lexica texts weigh far more
+than the 61 M letters of general literature (Pramāṇa), which are therefore not in the model, and a small LSTM did no
+better than the counts. On LDII_85885's 19 test pages (`recognizer test`): ft6 2.24 → 1.96 % CER and 3.66 → 3.00 % GER,
+pool1 2.48 → 2.15 % and 4.08 → 3.31 %. Python reads a line in about 0.08 s this way; the browser in 10 ms over the
+recogniser's own time. The port is held to the reference exactly (the same text on every fixture line from the same
+probabilities); on the browser runtime's own logits, which differ from Python's in the fifth decimal, a beam search
+may tip a line in twelve between two readings of nearly equal score, and the tests allow that.
+
 ## Reading a new manuscript and adapting the model to its hand
 
 | Step | Command | What it does |

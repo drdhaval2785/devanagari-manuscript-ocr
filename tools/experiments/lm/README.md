@@ -152,6 +152,9 @@ lexica folder plus every transcription) or when a Gujarati corpus arrives that t
 
 ## What to do with this
 
+*Done the same day (commit after this one): the pruned 6-gram mixture is in the pipeline, Python and browser alike:
+`msocr/lm.py`, `app/js/recoglm.js`, pipeline version 2; see the main README, "Reading with the language model".*
+
 1. **Decode with the LM in the pipeline.** A character 7-gram built from the lexica texts and the manuscripts' own
    transcriptions, mixed 0.7/0.3, with prefix beam search (beam 16, α 0.4, β 1.0) takes 16 % off pool1's CER and
    19 % off ft6's, 21–24 % off their GER, on lines never trained on, for about 0.1 s of CPU per line in Python. It

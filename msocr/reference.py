@@ -14,7 +14,9 @@ so the same stages run with PyTorch (torch_segmenter, torch_recogniser) or ONNX 
     recogniser_input(crop) -> x                 grey, scaled to height 48 (PIL bilinear), ink high
     recogniser(x) -> logits (T, classes)        the network
     decode(logits, chars) -> text, confidence   greedy CTC
-  run_page(page, layout, segmenter, recogniser, chars) -> {box: [{"baseline", "outline", "text", "conf"}]}
+    decode_lm(logits, chars, lm) -> text, confidence   prefix beam search with the language model (msocr/lm.py)
+  run_page(page, layout, segmenter, recogniser, chars, lm=None) -> {box: [{"baseline", "outline", "text", "conf"}]}
+    (with lm, a pack's language model as lm.load_dir gives it, every line is read with it)
 """
 import numpy as np
 from PIL import Image
@@ -92,9 +94,18 @@ def decode(logits, chars):
     return "".join(out), 100 * (sum(conf) / len(conf) if conf else 0.0)
 
 
+def decode_lm(logits, chars, lm):
+    """The reading with the language model: a prefix beam search over the columns' probabilities, each hypothesis
+    weighed by how its letters run in Sanskrit (lm.py: alpha, beta, beam of pipeline.json); confidence = mean
+    probability the recogniser gives the letters read, aligned back to their columns, in percent."""
+    from . import lm as L
+    text, conf, _ = L.decode(logits, chars, lm)
+    return text, conf
+
+
 # ---------------------------------------------------------------- a page
 
-def run_page(page, layout, segmenter, recogniser, chars):
+def run_page(page, layout, segmenter, recogniser, chars, lm=None):
     g = grey(page)
     x, s, w = segmenter_input(g)
     pb, pu, pd = maps(segmenter(x)[0], w)
@@ -102,7 +113,8 @@ def run_page(page, layout, segmenter, recogniser, chars):
     for box, rs in rows(lines(pb, pu, pd, s), g, layout).items():
         out[box] = []
         for baseline, outline in rs:
-            text, conf = decode(recogniser(recogniser_input(cut(page, baseline, outline)))[0], chars)
+            logits = recogniser(recogniser_input(cut(page, baseline, outline)))[0]
+            text, conf = decode_lm(logits, chars, lm) if lm else decode(logits, chars)
             out[box].append({"baseline": baseline, "outline": outline, "text": text, "conf": conf})
     return out
 

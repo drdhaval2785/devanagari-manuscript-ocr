@@ -267,7 +267,7 @@ def numbering_hints(lines, model):
 # ------------------------------------------------------------------ reading a page
 
 
-def read_rows(ms, image, seg, net, chars, tmp):
+def read_rows(ms, image, seg, net, chars, tmp, lm=None):
     """the page cut into rows as predict cuts it and each row read -> ({box: [(baseline, outline)]}, {box: rect},
     {box: [{file, text, conf}]}, size, note, warning)"""
     from .blocks import blocks_for_page, layout_of
@@ -286,7 +286,7 @@ def read_rows(ms, image, seg, net, chars, tmp):
             geo, rects = ({"main": merged} if merged else {}), {}
         order = lambda b: pagetext.BOXES.index(b) if b in pagetext.BOXES else 99       # noqa: E731
         geo = {b: geo[b] for b in sorted(geo, key=order)}
-        reads = {b: _read_rows(ms, image, size, rows, net, chars, tmp, stem, b) for b, rows in geo.items()}
+        reads = {b: _read_rows(ms, image, size, rows, net, chars, tmp, stem, b, lm) for b, rows in geo.items()}
     return geo, rects, reads, size, note, warn
 
 
@@ -333,7 +333,7 @@ def ink_errors(net, chars, lines):
     return out
 
 
-def page_result(ms, image, pdf_page, gt_path, seg, model, other):
+def page_result(ms, image, pdf_page, gt_path, seg, model, other, lm=None):
     """one page read and set against its truth"""
     from .predict import read_line
     net, chars, name = model
@@ -341,7 +341,7 @@ def page_result(ms, image, pdf_page, gt_path, seg, model, other):
     truth = pagetext.read(gt_path)
     with tempfile.TemporaryDirectory() as t:
         tmp = Path(t)
-        geo, rects, reads, size, note, warn = read_rows(ms, image, seg, net, chars, tmp)
+        geo, rects, reads, size, note, warn = read_rows(ms, image, seg, net, chars, tmp, lm)
         lines, problems = [], []
         for box in [b for b in pagetext.BOXES if b in geo or b in truth] + [b for b in truth if b not in pagetext.BOXES]:
             got = reads.get(box, [])
@@ -361,7 +361,7 @@ def page_result(ms, image, pdf_page, gt_path, seg, model, other):
                     ln.update(read=got[i]["text"], conf=got[i]["conf"], crop=crop,
                               base=[list(map(float, p)) for p in base], poly=[list(map(float, p)) for p in poly])
                     if other:
-                        ln["other"] = read_line(other[0], other[1], crop)[0]
+                        ln["other"] = read_line(other[0], other[1], crop, lm)[0]
                 if j is not None:
                     ln["truth"] = want[j]
                 lines.append(ln)
@@ -681,7 +681,7 @@ for (const sec of $('.pg-sec')) {
 # ------------------------------------------------------------------ command line
 
 
-def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False):
+def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False, lm=None):
     import datetime
     from .predict import model_label
     from .recognizer import load_model
@@ -713,14 +713,14 @@ def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False
         other, olabel = (onet, ochars), model_label(op, ock)
     results = []
     for (image, n), g in zip(chosen, gts):
-        r = page_result(ms, image, n, g, seg, (net, chars, name), other)
+        r = page_result(ms, image, n, g, seg, (net, chars, name), other, lm)
         results.append(r)
         extra = f" ({oname} {r['cer_o']:.2f} %)" if other else ""
         unp = f"; {r['unpaired_rows']} rows and {len(r['unpaired_lines'])} lines unpaired" if r["problems"] else ""
         extra += f", GER {r['ger']:.2f} %" + (f" ({oname} {r['ger_o']:.2f} %)" if other else "")
         print(f"[pagediff] {ms} PDF page {n} = {image[:-4]}: {r['cer']:.2f} % CER{extra} over {r['n_scored']} lines{unp}; "
               f"{sum(len(ln['hints']) for ln in r['lines'])} hints for the truth")
-    meta = {"ms": ms, "seg": seg, "model": name, "model_label": model_label(mp, ck), "other": oname,
+    meta = {"ms": ms, "seg": seg, "model": name, "model_label": model_label(mp, ck) + (" + language model " + ", ".join(f"{l.name} {w:.1f}" for l, w in lm.parts) if lm else " (greedy, no language model)"), "other": oname,
             "other_label": olabel, "pdf_pages": count, "when": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
     if out is None:
         first = chosen[0][0][:-4]
@@ -746,8 +746,10 @@ def main():
     ap.add_argument("--compare", help="a second recogniser, shown greyed and scored alongside")
     ap.add_argument("--out", help="the HTML file (default data/<ms>/pagediff/<page>_<model>.html)")
     ap.add_argument("--open", action="store_true", help="open the page in the browser when written")
+    ap.add_argument("--lm", help="a language model build (default the newest under data/lm), or 'none' to read greedily")
     a = ap.parse_args()
-    run(a.pdf, a.pages, a.model, a.gt, a.seg, a.compare, a.out, a.open)
+    from .lm import load_default
+    run(a.pdf, a.pages, a.model, a.gt, a.seg, a.compare, a.out, a.open, lm=load_default(a.lm))
 
 
 if __name__ == "__main__":
