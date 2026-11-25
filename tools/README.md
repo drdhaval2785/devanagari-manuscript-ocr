@@ -21,3 +21,11 @@ Python ones need `PYTHONPATH=.`. None of them writes to `data/<ms>/seg/` or to a
 | `experiments/align_commentary_v7c.py` | A version of `msocr/align.py` with the stem/pen/density commentary rule (2026-11-24); set aside because it changed 7 of 155 pages the review had passed. Kept for its `_hand` (row-own ink threshold that counts red ink, smooth stem length) |
 
 `../backups/code/` keeps earlier versions of the pipeline's code (the project is not under version control).
+
+## experiments/lm — reading with a language model (2026-11-25)
+
+Whether the letter patterns of proof-read Sanskrit text (the spacer's Pramāṇa sentences, the lexica texts, the
+manuscripts' own transcriptions) mend the recogniser's recurring mistakes: the mistakes mined by character and akṣara,
+character n-gram and LSTM language models, CTC prefix beam search with the LM over the saved probabilities, measured on
+every held-out line of ft6 and pool1. Findings, numbers and what to do next in `experiments/lm/README.md`; result
+files in `experiments/lm/results/`.

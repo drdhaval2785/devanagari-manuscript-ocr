@@ -1,0 +1,42 @@
+punct mixture: alpha 0.4 beta 1.5
+[pool1] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_lexicaP7.npz:0.7,/private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_msP_pool7.npz:0.3 alpha 0.4 beta 1.5 beam 16 punct
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             13       5.54     4.31       8.64     6.53   8/3
+  LDII_45364            15       3.41     2.88       4.67     3.54   4/1
+  LDII_19634            12       4.31     3.82       5.20     4.30   4/0
+  LDII_1806             17       5.08     4.23       7.50     5.83   8/5
+  LDII_85885 test      361       2.50     2.14       4.08     3.28   160/42
+  LDII_85885 val       120       3.30     2.75       4.94     3.74   60/5
+  LDII_82668            26       2.92     2.18       5.74     3.81   16/2
+  all                  564       2.81     2.37       4.52     3.53
+[pool1] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_lexicaP7.npz alpha 0.2 beta 1.0 beam 16 punct
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             13       5.54     4.21       8.64     6.14   8/1
+  LDII_45364            15       3.41     3.19       4.67     3.82   3/2
+  LDII_19634            12       4.31     3.82       5.20     4.48   4/0
+  LDII_1806             17       5.08     4.69       7.50     6.55   9/6
+  LDII_85885 test      361       2.50     2.21       4.08     3.44   134/35
+  LDII_85885 val       120       3.30     2.87       4.94     3.94   48/4
+  LDII_82668            26       2.92     2.32       5.74     4.08   14/1
+  all                  564       2.81     2.47       4.52     3.71
+[ft6] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_lexicaP7.npz:0.7,/private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_msP_ft6_7.npz:0.3 alpha 0.4 beta 1.5 beam 16 punct
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             65       7.21     5.06      12.58     8.21   45/6
+  LDII_45364            75       5.72     5.56       8.57     7.75   30/30
+  LDII_19634            12       4.60     3.82       5.91     4.66   7/1
+  LDII_1806             85      13.47    12.84      21.10    19.70   40/30
+  LDII_85885 test      361       2.24     1.96       3.64     3.01   138/52
+  LDII_85885 val       120       3.08     2.61       4.64     3.57   54/8
+  LDII_82668           130      11.43     8.15      18.83    12.28   116/5
+  all                  848       5.28     4.33       8.84     6.80
+[ft6] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_lexicaP7.npz alpha 0.2 beta 1.0 beam 16 punct
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             65       7.21     5.62      12.58     9.24   47/8
+  LDII_45364            75       5.72     5.27       8.57     7.15   26/16
+  LDII_19634            12       4.60     3.92       5.91     4.66   6/0
+  LDII_1806             85      13.47    12.69      21.10    19.26   47/21
+  LDII_85885 test      361       2.24     2.04       3.64     3.09   119/52
+  LDII_85885 val       120       3.08     2.69       4.64     3.73   50/8
+  LDII_82668           130      11.43     9.07      18.83    13.89   109/8
+  all                  848       5.28     4.54       8.84     7.13
+PUNCT DONE

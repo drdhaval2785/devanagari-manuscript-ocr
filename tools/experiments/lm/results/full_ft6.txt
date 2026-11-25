@@ -1,0 +1,61 @@
+[ft6] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_pramana7.npz alpha 0.0 beta 0.0 beam 16
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             65       7.21     7.03      12.58    12.39   10/3
+  LDII_45364            75       5.72     5.69       8.57     8.54   5/3
+  LDII_19634            12       4.60     4.70       5.91     6.09   0/1
+  LDII_1806             85      13.47    13.15      21.10    20.55   29/6
+  LDII_85885 test      361       2.24     2.22       3.64     3.57   19/5
+  LDII_85885 val       120       3.08     3.04       4.64     4.56   6/0
+  LDII_82668           130      11.43    11.31      18.83    18.39   34/17
+  all                  848       5.28     5.20       8.84     8.66
+[ft6] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_pramana7.npz alpha 0.2 beta 1.5 beam 16
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             65       7.21     6.09      12.58    10.30   39/4
+  LDII_45364            75       5.72     5.28       8.57     7.12   31/12
+  LDII_19634            12       4.60     4.60       5.91     5.91   2/2
+  LDII_1806             85      13.47    12.91      21.10    19.12   43/26
+  LDII_85885 test      361       2.24     2.17       3.64     3.41   81/62
+  LDII_85885 val       120       3.08     2.87       4.64     4.05   43/19
+  LDII_82668           130      11.43    10.15      18.83    15.59   85/28
+  all                  848       5.28     4.87       8.84     7.68
+[ft6] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_lexica7.npz alpha 0.2 beta 1.0 beam 16
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             65       7.21     5.43      12.58     8.98   50/3
+  LDII_45364            75       5.72     4.99       8.57     6.56   38/10
+  LDII_19634            12       4.60     3.92       5.91     4.66   6/0
+  LDII_1806             85      13.47    12.79      21.10    19.50   44/25
+  LDII_85885 test      361       2.24     2.03       3.64     3.11   119/50
+  LDII_85885 val       120       3.08     2.76       4.64     3.90   45/12
+  LDII_82668           130      11.43     9.42      18.83    14.53   110/13
+  all                  848       5.28     4.59       8.84     7.24
+[ft6] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_pramana7.npz:1,/private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_lexica7.npz:1 alpha 0.3 beta 1.5 beam 16
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             65       7.21     5.28      12.58     8.69   49/1
+  LDII_45364            75       5.72     5.02       8.57     6.61   37/13
+  LDII_19634            12       4.60     4.02       5.91     5.20   7/2
+  LDII_1806             85      13.47    12.80      21.10    19.28   42/26
+  LDII_85885 test      361       2.24     2.03       3.64     3.19   121/55
+  LDII_85885 val       120       3.08     2.72       4.64     3.82   49/17
+  LDII_82668           130      11.43     9.14      18.83    13.94   109/13
+  all                  848       5.28     4.53       8.84     7.14
+usage: decode.py [-h] --lm LM [--alpha ALPHA] [--beta BETA] [--beam BEAM]
+                 [--sets [SETS ...]] [--prev-line] [--limit LIMIT] [--out OUT]
+                 [--jobs JOBS]
+                 dump
+decode.py: error: argument --beta: invalid float value: '1.0  # decoded CER 2.77 in grid_pool1_lexms.txt'
+usage: decode.py [-h] --lm LM [--alpha ALPHA] [--beta BETA] [--beam BEAM]
+                 [--sets [SETS ...]] [--prev-line] [--limit LIMIT] [--out OUT]
+                 [--jobs JOBS]
+                 dump
+decode.py: error: argument --beta: invalid float value: '1.0  # decoded CER 2.77 in grid_pool1_lexms.txt'
+[ft6] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_lexica7.npz alpha 0.2 beta 1.0 beam 16 prev-line
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             65       7.21     5.37      12.58     8.87   50/3
+  LDII_45364            75       5.72     4.95       8.57     6.56   38/10
+  LDII_19634            12       4.60     3.92       5.91     4.66   6/0
+  LDII_1806             85      13.47    12.82      21.10    19.59   43/26
+  LDII_85885 test      361       2.24     2.02       3.64     3.08   122/48
+  LDII_85885 val       120       3.08     2.75       4.64     3.87   45/12
+  LDII_82668           130      11.43     9.38      18.83    14.39   109/11
+  all                  848       5.28     4.57       8.84     7.20
+FULL RUNS DONE

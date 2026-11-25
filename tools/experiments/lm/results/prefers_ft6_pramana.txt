@@ -1,0 +1,37 @@
+[ft6] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_pramana7.npz
+  set                lines   truth more probable than reading akṣara subs LM prefers truth by > 1 nat
+  LDII_9851             65                                85%         287              70%        65%
+  LDII_45364            75                                76%         246              68%        65%
+  LDII_19634            12                                83%          29              79%        76%
+  LDII_1806             85                                82%         757              61%        58%
+  LDII_85885 test      361                                55%         596              62%        58%
+  LDII_85885 val       120                                66%         206              73%        69%
+  LDII_82668           130                               100%        1474              79%        75%
+  all                  848                                71%        3595              71%        67%
+  margin (log P truth - log P as read) over substitutions: median 5.70, quartiles -0.14 / 14.26
+  commonest substitutions and how often the LM prefers the truth:
+      61  । → ॥   0%
+      61  नां → ना   5%
+      24  ॥ → ।   0%
+      17  २ → र   94%
+      14  दी → ही   100%
+      14  णि → ण   93%
+      13  स्तु → सु   46%
+      12  ते → त   58%
+      12  ए → प   67%
+      11  म → स   73%
+      11  द → ह   91%
+      11  श → त्रा   100%
+      11  दि → हि   100%
+      10  २ → ३   0%
+      10  १ → ऽ   80%
+      10  द्वि → द्वे   100%
+      10  श → शा   80%
+      10  मै → मे   40%
+       9  ३ → २   0%
+       9  दं → हं   56%
+       9  छ → ठ   67%
+       8  नी → ना   62%
+       8  त् → त   62%
+       8  व → च   62%
+       8  ।् → ।   0%

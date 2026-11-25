@@ -1,0 +1,49 @@
+final LSTM checkpoint: step 18500 val loss 1.911
+  LDII_9851            LSTM perplexity    14.90
+  LDII_45364           LSTM perplexity    14.09
+  LDII_19634           LSTM perplexity    13.82
+  LDII_1806            LSTM perplexity    18.42
+  LDII_85885 test      LSTM perplexity    10.81
+  LDII_85885 val       LSTM perplexity     9.39
+  LDII_82668           LSTM perplexity    10.21
+[pool1] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lstm_final.pt alpha 0.4 beta 1.0 beam 16
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             13       5.54     5.24       8.64     7.87   4/2
+  LDII_45364            15       3.41     3.26       4.67     3.82   2/1
+  LDII_19634            12       4.31     3.92       5.20     4.66   3/0
+  LDII_1806             17       5.08     4.56       7.50     6.43   9/5
+  LDII_85885 test      361       2.50     2.30       4.08     3.62   111/36
+  LDII_85885 val       120       3.30     2.93       4.94     4.10   45/9
+  LDII_82668            26       2.92     2.59       5.74     4.63   11/6
+  all                  564       2.81     2.57       4.52     3.91
+[pool1] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lstm_final.pt:0.7,/private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_ms_pool7.npz:0.3 alpha 0.4 beta 1.0 beam 16
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             13       5.54     4.62       8.64     7.10   7/2
+  LDII_45364            15       3.41     3.26       4.67     3.82   2/1
+  LDII_19634            12       4.31     3.92       5.20     4.66   3/0
+  LDII_1806             17       5.08     4.10       7.50     5.83   11/4
+  LDII_85885 test      361       2.50     2.22       4.08     3.47   124/22
+  LDII_85885 val       120       3.30     2.91       4.94     4.03   48/8
+  LDII_82668            26       2.92     2.26       5.74     4.03   16/2
+  all                  564       2.81     2.48       4.52     3.75
+[ft6] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lstm_final.pt alpha 0.4 beta 1.0 beam 16
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             65       7.21     5.35      12.58     8.87   48/4
+  LDII_45364            75       5.72     5.10       8.57     6.81   38/13
+  LDII_19634            12       4.60     4.31       5.91     5.38   3/2
+  LDII_1806             85      13.47    12.87      21.10    19.41   41/29
+  LDII_85885 test      361       2.24     2.08       3.64     3.18   100/40
+  LDII_85885 val       120       3.08     2.82       4.64     3.97   42/13
+  LDII_82668           130      11.43     9.52      18.83    14.74   103/14
+  all                  848       5.28     4.65       8.84     7.34
+[ft6] lm /private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lstm_final.pt:0.7,/private/tmp/claude-501/-Users-Shared-drdhaval2785-lexicon-manuscripts-sanskrit-spacer/2124ba3b-7ca6-4563-8a1e-dd4c8df00175/scratchpad/lm/lm_ms_ft6_7.npz:0.3 alpha 0.4 beta 1.0 beam 16
+  set                lines greedy CER  decoded greedy GER  decoded   lines better/worse
+  LDII_9851             65       7.21     5.06      12.58     8.36   53/4
+  LDII_45364            75       5.72     5.11       8.57     6.78   33/14
+  LDII_19634            12       4.60     3.92       5.91     4.66   6/1
+  LDII_1806             85      13.47    12.48      21.10    18.93   47/21
+  LDII_85885 test      361       2.24     2.02       3.64     3.10   114/33
+  LDII_85885 val       120       3.08     2.74       4.64     3.75   42/11
+  LDII_82668           130      11.43     9.20      18.83    14.15   108/10
+  all                  848       5.28     4.51       8.84     7.08
+LSTM FINAL DONE
