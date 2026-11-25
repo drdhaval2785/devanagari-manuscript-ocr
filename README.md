@@ -60,6 +60,31 @@ overrides): 4.4 s a page, no swap. The GPU's lines are within a pixel or so of t
 | 4 | `.venv/bin/python -m msocr.recognizer train LDII_85885 --run run1` | Trains the recogniser, reporting after every pass | hours |
 | 5 | `.venv/bin/python -m msocr.recognizer test LDII_85885 --run run1` | Final score on 20 pages never used in training | seconds |
 
+### The transcription
+
+LDII_85885's transcription is read from the editor's own git-tracked file,
+`edit_manuscripts/abhidhanachintamani_commentaries/charitrasimha/transcriptions/LDII_85885.xml` (the editions folder
+beside this corpus; `msocr/config.py`, or `MSOCR_TEI_LDII_85885=<file>` for another). Until 2026-11-25 it was the
+corpus's copy (`abhidhanachintamani_commentaries/charitrasimha/transcriptions/LDII_85885.xml`), a snapshot of
+2026-10-10 that lacked the editor's later corrections; `export` still takes its TEI header from that copy, because the
+editor's file is now a Manuscribe export whose header describes LDII_85885 itself. After the transcription changes,
+extract and align again and cut the lines anew (the caches are cut once and kept, so move them aside first):
+
+```
+D=data/LDII_85885; B=$D/backups/before_<date>; mkdir -p $B
+mv $D/gt_lines.jsonl $D/pagexml $D/pagexml_seg_torch $D/lines $D/lines_seg_torch $B/; cp $D/*.txt $B/
+.venv/bin/python -c "from msocr import gt; gt.extract('LDII_85885')"
+.venv/bin/python -m msocr.align LDII_85885
+.venv/bin/python -m msocr.align LDII_85885 --seg=seg_torch
+.venv/bin/python -c "from msocr.recognizer import build_cache; build_cache('LDII_85885'); build_cache('LDII_85885', seg='seg_torch')"
+```
+
+Every page keeps the set (train, validation, test) it was first given, so scores stay comparable; a page that no longer
+pairs drops out of its set, and a page that newly pairs joins train. Switching to the editor's file (2026-11-25): 5,423
+lines on 286 pages (5,421 before), 1,148 lines' text changed; Kraken's rows pair on 278 pages (266 before: train
+235, validation 24, test 19), the U-Net's on 280 (282 before: 237, 24, 19). The test pages are the same 19. Two pages
+left out by a second `<lb>` splitting a word (0010_1 line 8, 0037_2 line 17), which pair again once it is removed.
+
 ## Reading a new manuscript and adapting the model to its hand
 
 | Step | Command | What it does |

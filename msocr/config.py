@@ -45,8 +45,13 @@ def _discover():
 
 
 MANUSCRIPTS = _discover()
-# manuscripts with a transcription (used for training from the TEI)
-MANUSCRIPTS["LDII_85885"]["tei"] = CORPUS / "abhidhanachintamani_commentaries/charitrasimha/transcriptions/LDII_85885.xml"
+# manuscripts with a transcription (used for training from the TEI): the editor's own git-tracked file, in the editions
+# folder beside the corpus (edit_manuscripts/<text>/<commentary>/transcriptions/), not the corpus's copy, which is an older
+# snapshot (2026-10-10). MSOCR_TEI_LDII_85885 names another file. After it changes: gt.extract, align (seg and
+# seg_torch) and the line caches again (README, "The transcription").
+EDITIONS = CORPUS.parent / "edit_manuscripts"
+MANUSCRIPTS["LDII_85885"]["tei"] = Path(os.environ.get("MSOCR_TEI_LDII_85885") or
+                                        EDITIONS / "abhidhanachintamani_commentaries/charitrasimha/transcriptions/LDII_85885.xml")
 
 
 def not_text(ms_id: str) -> set:

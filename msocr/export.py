@@ -38,9 +38,12 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from . import pagetext
-from .config import MANUSCRIPTS, ms_dir, not_text
+from .config import CORPUS, MANUSCRIPTS, ms_dir, not_text
 
-REFERENCE_TEI = MANUSCRIPTS["LDII_85885"]["tei"]
+# the header every exported TEI starts from (title and source replaced): the corpus's copy of LDII_85885.xml, whose
+# header is the plain one this layout was made for. Not the transcription training reads (config), which is now a
+# Manuscribe export whose <sourceDesc> describes LDII_85885 itself (siglum, layout) and would be carried into others.
+REFERENCE_TEI = CORPUS / "abhidhanachintamani_commentaries/charitrasimha/transcriptions/LDII_85885.xml"
 TITLES = {"LDII_19634": "हेमाभिधानचिंतामणिनाममाला - बालावबोध",
           "AKGM_0025383": "हेमाभिधानचिंतामणिनाममालादीपिका - तात्पर्यार्थप्रकाशिका (चारित्रसिंही)"}
 # the library a manuscript comes from, by the prefix of its id
