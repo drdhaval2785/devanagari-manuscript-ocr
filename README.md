@@ -26,8 +26,10 @@ makes are published separately under CC BY-SA 4.0.
 
 ```
 /opt/homebrew/bin/python3.11 -m venv .venv
-.venv/bin/pip install "kraken==7.2" lxml rapidfuzz
+.venv/bin/pip install "kraken==7.2" lxml rapidfuzz pypdf
 ```
+
+(`pypdf` only lets `msocr.pagediff` check a PDF's page count against its page images; without it the check is skipped.)
 
 Segmentation always uses `data/kraken_models/blla_kraken7.1.1.mlmodel` (`KRAKEN_SEG_MODEL` in `msocr/config.py`): the
 baseline model bundled with kraken 7.1.1, which segmented every manuscript so far. It is not part of this repository;
@@ -104,6 +106,47 @@ corrected pages: the number that says how generic the model has become. Name man
 `pool` to use only those. A pass of 3000 lines takes about 3 minutes; the run stops after 8 passes
 without gain or `--passes` (40). A corrected page whose line count does not match its line images
 is skipped and reported, as in `finetune`.
+
+## A page's reading against its ground truth, to look at
+
+`msocr.pagediff` reads a page with a model and sets the reading against the page's ground truth in one HTML page:
+the page image with the rows drawn on it (coloured by how well each was read; click one to go to its line), and line
+by line the crop the model read, the truth and the reading with the differences marked akṣara by akṣara. It shows
+where a model goes wrong on a hand, and where the truth itself may need a second look.
+
+```
+.venv/bin/python -m msocr.pagediff LDII_9851 132 --model pool1
+.venv/bin/python -m msocr.pagediff LDII_9851.pdf 66_1 --model pool1 --compare LDII_19634/ft6 --open
+.venv/bin/python -m msocr.pagediff LDII_1806 136 --gt ~/Desktop/001806_00068_1.txt --seg seg --model data/pool/models/pool1/best.pt
+.venv/bin/python -m msocr.pagediff LDII_9851 26_2 66_1 --model pool1          # several pages in one HTML
+```
+
+| Input | What it takes |
+|---|---|
+| manuscript | Its name (`LDII_9851`), its PDF's name (`LDII_9851.pdf`) or the PDF's path. The page images extracted beside the PDF are what is read |
+| pages | One or more: a PDF page number (1 is the PDF's first page; the page images in name order are the PDF's pages one by one, and the PDF's page count is checked against them), a folio and side (`66_1`), or an image name (`009851_00066_1`) |
+| `--gt` | The page's ground truth in the format of `corrected/` (one line per manuscript line; a `;box{top}` marker before each block of a tripāṭha or pañcapāṭha page). Once per page, in the pages' order. Default `data/<ms>/corrected/<page>.txt` |
+| `--seg` | The segmentation the rows are cut from: `seg_torch` (the U-Net's, the default) or `seg` (Kraken's). A page not yet segmented so is segmented first |
+| `--model` | The recogniser: a `best.pt`, its folder, or a run's name (`pool1`, `ft6`; `LDII_19634/ft6` when several manuscripts have a run of that name) |
+| `--compare` | Optional: a second recogniser, scored alongside; its reading is shown greyed on request |
+| `--out`, `--open` | Where to write (default `data/<ms>/pagediff/<page>_<model>.html`); open it in the browser when written |
+
+How it is measured: the page is cut into rows as `predict` cuts it (block by block on a tripāṭha or pañcapāṭha page)
+and each row is read on its own, as `predict` and Manuscribe read; a training log reads the same lines in batches, so
+its score for a page can differ by a little (2026-11-25, pool1: LDII_9851's held-out page 6.59 % in batches against
+6.80 % line by line, LDII_1806's 5.76 % both ways). Rows pair with the truth's lines block by block, in order when a
+block has as many rows as lines (as training pairs them); otherwise by the closest readings, and the rows and lines
+left over are shown unpaired and not scored. Spaces are taken out of both, as in training; a line the truth leaves empty is shown but not scored.
+A page the model trained on reads almost perfectly (pool1 on LDII_9851's 26_2: 0.00 %): judge a model on pages it never
+saw, as the held-out ones (the last corrected page of each manuscript, by name).
+
+What the page shows besides the lines: the CER (edits per 100 characters of the truth) and the mistakes sorted into
+kinds (a different consonant or conjunct; the same consonants with other vowel signs or anusvāra; an error at either
+end of a line; a daṇḍa or numeral); the mistakes made more than once; errors per character in red ink against black,
+on a page with red ink; and hints for the truth, found by rule: two vowel signs in a row, a virama after a vowel sign,
+a Latin letter or digit, and a numeral that breaks the page's count or verse numbering (`॥ ७४ ॥` after `॥ ७४ ॥`) where the
+model read the number that would continue it. The HTML holds its images, so it can be moved or sent as one file
+(2–3 MB a page). About 3 s a page.
 
 ## Tripāṭha and pañcapāṭha manuscripts: blocks
 
@@ -353,6 +396,7 @@ counts a page as checked.
   - `seg/` Kraken's lines per page, `rowcheck.txt` the row finder's report (per block on a tripāṭha or pañcapāṭha), `show/` the segmentation drawn on the pages and its PDF
   - `gt_lines.jsonl`, `pagexml/`, `lines/`, `preview/`, `train.txt` `val.txt` `test.txt` — training data of a transcribed manuscript
   - `drafts/`, `to_correct/`, `review/`, `corrected/`, `machine/`, `lines/pred/` — the model's readings and their corrections
+  - `pagediff/` — pages read by a model against their ground truth, as HTML (`msocr.pagediff`)
   - `<manuscript>.txt`, `<manuscript>.xml`, `backups/`, `corrected_upto.txt` — the gathered text and the TEI round; `<manuscript>.machine.xml` the whole manuscript as one model read it
   - `models/<run>/` (`train.log`, `history.csv`, `best.pt`)
 - `data/pool/` — `models/<run>/` of the pooled training, `pages.txt` the pages chosen for correction, `review.html` links to their review pages
