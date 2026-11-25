@@ -673,17 +673,27 @@ def align(ms_id: str, preview: int = 3, seg: str = "seg"):
               f"min {min(line_heights)}, max {max(line_heights)}")
     print(f"  preview images : {prev_dir}")
 
+    stem = lambda p: Path(p).stem
+    # every page's set, remembered even while the page does not pair (split_pages.tsv: page, set), so that a page left out
+    # for a while (a transcription slip, say) comes back to its own set, not to train
+    record_path = d / "split_pages.tsv"
+    record = dict(ln.split("\t") for ln in record_path.read_text().split("\n") if "\t" in ln) if record_path.exists() else {}
     first = sfx if all((d / f"{n}{sfx}.txt").exists() for n in ("train", "val", "test")) else ""
-    if all((d / f"{n}{first}.txt").exists() for n in ("train", "val", "test")):
+    if record or all((d / f"{n}{first}.txt").exists() for n in ("train", "val", "test")):
         # keep every page in the set it was first given (for another segmentation, the set Kraken's gave it), so scores
         # stay comparable between runs
-        stem = lambda p: Path(p).stem
-        old = {n: {stem(p) for p in (d / f"{n}{first}.txt").read_text().split()} for n in ("train", "val", "test")}
+        old = {n: {stem(p) for p in (d / f"{n}{first}.txt").read_text().split()} if (d / f"{n}{first}.txt").exists() else set()
+               for n in ("train", "val", "test")}
+        for s, n in record.items():         # the record (the set first given) over the lists of the last run
+            for m in old:
+                old[m].discard(s)
+            old[n].add(s)
         ok = {stem(p): str(p) for p in accepted}
         test = sorted(ok[s] for s in old["test"] if s in ok)
         val = sorted(ok[s] for s in old["val"] if s in ok)
         train = sorted(p for s, p in ok.items() if s not in old["test"] and s not in old["val"])
-        print("  split: kept the existing assignment of pages" + (" (Kraken's set's)" if sfx and not first else "") + " (newly rejected pages removed)")
+        print("  split: kept the existing assignment of pages" + (" (Kraken's set's)" if sfx and not first else "")
+              + " (pages that no longer pair left out, and remembered in split_pages.tsv)")
     else:
         rng = random.Random(SEED)
         pages = sorted(str(p) for p in accepted)
@@ -694,6 +704,9 @@ def align(ms_id: str, preview: int = 3, seg: str = "seg"):
         train = sorted(pages[TEST_PAGES + n_val:])
     for name, part in (("train", train), ("val", val), ("test", test)):
         (d / f"{name}{sfx}.txt").write_text("\n".join(str(p) for p in part) + "\n")
+        for p in part:
+            record.setdefault(stem(p), name)
+    record_path.write_text("".join(f"{s}\t{n}\n" for s, n in sorted(record.items())))
     print(f"  split (whole pages) : train {len(train)}, validation {len(val)}, test {len(test)}")
     print("    train      = pages the model learns from")
     print("    validation = pages scored after every pass to track progress and pick the best model")

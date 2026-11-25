@@ -79,11 +79,13 @@ mv $D/gt_lines.jsonl $D/pagexml $D/pagexml_seg_torch $D/lines $D/lines_seg_torch
 .venv/bin/python -c "from msocr.recognizer import build_cache; build_cache('LDII_85885'); build_cache('LDII_85885', seg='seg_torch')"
 ```
 
-Every page keeps the set (train, validation, test) it was first given, so scores stay comparable; a page that no longer
-pairs drops out of its set, and a page that newly pairs joins train. Switching to the editor's file (2026-11-25): 5,423
-lines on 286 pages (5,421 before), 1,148 lines' text changed; Kraken's rows pair on 278 pages (266 before: train
-235, validation 24, test 19), the U-Net's on 280 (282 before: 237, 24, 19). The test pages are the same 19. Two pages
-left out by a second `<lb>` splitting a word (0010_1 line 8, 0037_2 line 17), which pair again once it is removed.
+Every page keeps the set (train, validation, test) it was first given, so scores stay comparable: `align` records each
+page's set in `data/<ms>/split_pages.tsv` and keeps the record while a page does not pair (a slip in the transcription,
+say), so that it returns to its own set rather than to train; a page that pairs for the first time joins train.
+Switching to the editor's file (2026-11-25, with three stray `<lb>` corrected in it): 5,421 lines on 286 pages, 1,148
+lines' text changed. The validation (25) and test (19) pages are the same as before, on both segmentations; Kraken's
+rows pair on 14 more train pages than when they were first aligned (236; the row finder has changed since), the U-Net's
+on the same 238.
 
 ## Reading a new manuscript and adapting the model to its hand
 
