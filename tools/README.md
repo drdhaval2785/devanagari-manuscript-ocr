@@ -29,3 +29,10 @@ manuscripts' own transcriptions) mend the recogniser's recurring mistakes: the m
 character n-gram and LSTM language models, CTC prefix beam search with the LM over the saved probabilities, measured on
 every held-out line of ft6 and pool1. Findings, numbers and what to do next in `experiments/lm/README.md`; result
 files in `experiments/lm/results/`.
+
+## experiments/margins — errors at the ends of lines (2026-11-26)
+
+Whether the U-Net segmenter cuts lines short at the margins: every corrected line of the pool's eight manuscripts read
+from the U-Net's rows and from Kraken's, the errors placed along the line, the cut's ends measured. It is not the
+segmenter (both give the same text block); the truth of two pages inherited an old short cut; letters squeezed against
+a ruled margin are clipped by the cut that stops short of the rule. Findings in `experiments/margins/README.md`.

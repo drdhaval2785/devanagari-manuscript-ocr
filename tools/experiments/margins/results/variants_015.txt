@@ -1,0 +1,26 @@
+
+=== unseen pages (pool1, greedy): 366 lines
+cut    akṣara edits/100 | middle wrong% | left end wrong%: ruled  unruled | right end wrong%: ruled  unruled
+now                 13.4    |         11.8  |     20.5 (351)     - (  0) |     38.3 (345)     - (  0)
+pad                 13.7    |         11.9  |     25.1 (351)     - (  0) |     42.9 (345)     - (  0)
+wide                13.3    |         11.8  |     13.1 (351)     - (  0) |     32.2 (345)     - (  0)
+erase               13.5    |         11.8  |     17.7 (351)     - (  0) |     39.7 (345)     - (  0)
+  now -> pad, ends that changed: left wrong->right 15, left right->wrong 31, right wrong->right 20, right right->wrong 36
+
+=== all pages (pool1, greedy): 650 lines
+cut    akṣara edits/100 | middle wrong% | left end wrong%: ruled  unruled | right end wrong%: ruled  unruled
+now                  7.2    |          6.3  |     11.3 (635)     - (  0) |     21.0 (629)     - (  0)
+pad                  7.4    |          6.3  |     15.3 (635)     - (  0) |     25.4 (629)     - (  0)
+wide                 7.2    |          6.3  |      7.9 (635)     - (  0) |     21.0 (629)     - (  0)
+erase                7.3    |          6.3  |     10.2 (635)     - (  0) |     25.6 (629)     - (  0)
+  now -> pad, ends that changed: left wrong->right 15, left right->wrong 40, right wrong->right 20, right right->wrong 48
+
+=== per manuscript, right end wrong % now / pad / wide / erase (inherited ends left out), ruled ends of its pages
+  LDII_1806  right   4.7 /   8.2 /   8.2 /   8.2   left   0.0 /   0.0 /   3.5 /   2.4   ruled ends right 85/85, left 85/85
+  LDII_4278  right  21.8 /  20.0 /  16.4 /  14.5   left  11.4 /   4.5 /   6.8 /   6.8   ruled ends right 55/55, left 44/44
+  LDII_45364 right   1.3 /   6.7 /   4.0 /   6.7   left   1.3 /   6.7 /   2.7 /   4.0   ruled ends right 75/75, left 75/75
+  LDII_6487  right  57.1 /  67.1 /  50.0 /  61.4   left  34.2 /  43.8 /  15.1 /  26.0   ruled ends right 70/70, left 73/73
+  LDII_80136 right  34.1 /  42.0 /  28.4 /  38.6   left  19.1 /  19.1 /   9.0 /  19.1   ruled ends right 88/88, left 89/89
+  LDII_82320 right  60.7 /  65.6 /  50.8 /  57.4   left  25.7 /  33.8 /  23.0 /  23.0   ruled ends right 61/61, left 74/74
+  LDII_82668 right   3.1 /   6.9 /   9.2 /  15.4   left   0.0 /   4.6 /   2.3 /   0.8   ruled ends right 130/130, left 130/130
+  LDII_9851  right   6.2 /   6.2 /  15.4 /  13.8   left   7.7 /  15.4 /   4.6 /   4.6   ruled ends right 65/65, left 65/65

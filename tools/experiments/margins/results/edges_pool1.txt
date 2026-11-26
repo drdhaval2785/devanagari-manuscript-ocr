@@ -1,0 +1,48 @@
+
+=== unseen pages (pool1, greedy)
+seg        lines aks   err  CER-like | first wrong% last wrong% middle wrong% | share of edits at: left right
+seg_torch    366 18498  2484  13.4 |        23.8       41.8         11.8  |   3.9   7.5
+seg          366 18498  2560  13.8 |        25.4       44.5         12.1  |   4.0   7.7
+  wrong % by place (lines of 12+ akṣaras):   from the left 1..6        |        from the right 6..1
+  seg_torch   23.8  11.5  12.0   9.8   9.0  10.7  |  12.0  12.6  12.3  13.9  15.0  41.8
+  seg         25.4  13.4  10.9   9.6  10.9  10.4  |  12.8   9.3  11.7  12.3  16.9  44.5
+  at the ends, the kind of error (missing = the reading lacks akṣaras the truth has; extra = has more)
+  seg_torch  left  misread 69, extra 16, missing 2
+  seg_torch  right misread 124, missing 15, extra 14
+  seg        left  misread 75, extra 15, missing 3
+  seg        right misread 124, missing 23, extra 14
+  the cut at each end: share of ends, and how often the end akṣara is then wrong
+  seg        ends | clipped: share  wrong% | drift>0.15 pitch: share wrong% | row runs >1 pitch past the segmenter: share wrong% | otherwise wrong%
+  seg_torch   732 |       48.6  46.6    |              0.0     -     |                              3.1  65.2         |  18.3
+  seg         732 |       49.6  50.1    |              0.4  33.3     |                              7.9  53.4         |  18.0
+
+=== all pages (pool1, greedy)
+seg        lines aks   err  CER-like | first wrong% last wrong% middle wrong% | share of edits at: left right
+seg_torch    650 34825  2495   7.2 |        13.4       23.5          6.3  |   3.8   7.5
+seg          650 34825  2587   7.4 |        14.6       25.7          6.5  |   4.0   7.8
+  wrong % by place (lines of 12+ akṣaras):   from the left 1..6        |        from the right 6..1
+  seg_torch   13.4   6.5   6.8   5.5   5.1   6.2  |   6.8   7.2   7.1   7.8   8.5  23.5
+  seg         14.6   7.5   6.2   5.4   6.2   6.0  |   7.2   5.4   6.8   6.9   9.5  25.7
+  at the ends, the kind of error (missing = the reading lacks akṣaras the truth has; extra = has more)
+  seg_torch  left  misread 69, extra 16, missing 2
+  seg_torch  right misread 124, missing 15, extra 14
+  seg        left  misread 76, extra 15, missing 4
+  seg        right misread 128, missing 23, extra 14
+  the cut at each end: share of ends, and how often the end akṣara is then wrong
+  seg        ends | clipped: share  wrong% | drift>0.15 pitch: share wrong% | row runs >1 pitch past the segmenter: share wrong% | otherwise wrong%
+  seg_torch  1300 |       44.2  28.9    |              0.0     -     |                              1.9  60.0         |   9.4
+  seg        1300 |       45.5  31.4    |              0.2  33.3     |                              4.8  49.2         |   9.3
+
+=== the same line under both (paired to the same truth line)
+  left  end of 650 lines: wrong in both 72, only from U-Net rows 15, only from Kraken rows 23, right in both 540
+  right end of 650 lines: wrong in both 139, only from U-Net rows 14, only from Kraken rows 28, right in both 469
+
+=== per manuscript: first and last akṣara wrong % (U-Net rows / Kraken rows), middle wrong %, rows vs lines
+  LDII_1806   U-Net   0.0/  4.7/  1.4 (85 lines, 0 pages miscounted)   Kraken   3.5/  8.2/  1.3 (85 lines, 0 pages miscounted)
+  LDII_4278   U-Net  29.1/ 21.8/  4.4 (55 lines, 0 pages miscounted)   Kraken  29.1/ 18.2/  4.5 (55 lines, 0 pages miscounted)
+  LDII_45364  U-Net   1.3/  1.3/  0.8 (75 lines, 0 pages miscounted)   Kraken   2.7/  4.0/  0.6 (75 lines, 0 pages miscounted)
+  LDII_6487   U-Net  36.0/ 60.0/ 16.1 (75 lines, 0 pages miscounted)   Kraken  38.7/ 66.7/ 16.6 (75 lines, 0 pages miscounted)
+  LDII_80136  U-Net  20.0/ 35.6/  9.9 (90 lines, 0 pages miscounted)   Kraken  20.0/ 37.8/ 10.1 (90 lines, 0 pages miscounted)
+  LDII_82320  U-Net  26.7/ 68.0/ 20.0 (75 lines, 0 pages miscounted)   Kraken  30.7/ 66.7/ 20.2 (75 lines, 0 pages miscounted)
+  LDII_82668  U-Net   0.0/  3.1/  0.8 (130 lines, 0 pages miscounted)   Kraken   0.8/  6.9/  1.1 (130 lines, 0 pages miscounted)
+  LDII_9851   U-Net   7.7/  6.2/  1.2 (65 lines, 0 pages miscounted)   Kraken   4.6/  6.2/  1.5 (65 lines, 0 pages miscounted)
