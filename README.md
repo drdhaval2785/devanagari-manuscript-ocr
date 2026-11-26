@@ -196,7 +196,7 @@ where a model goes wrong on a hand, and where the truth itself may need a second
 
 ```
 .venv/bin/python -m msocr.pagediff LDII_9851 132 --model pool1
-.venv/bin/python -m msocr.pagediff LDII_9851.pdf 66_1 --model pool1 --compare LDII_19634/ft6 --open
+.venv/bin/python -m msocr.pagediff LDII_9851.pdf 66_1 --model pool1 --compare greedy --compare LDII_19634/ft6 --open
 .venv/bin/python -m msocr.pagediff LDII_1806 136 --gt ~/Desktop/001806_00068_1.txt --seg seg --model data/pool/models/pool1/best.pt
 .venv/bin/python -m msocr.pagediff LDII_9851 26_2 66_1 --model pool1          # several pages in one HTML
 ```
@@ -208,7 +208,7 @@ where a model goes wrong on a hand, and where the truth itself may need a second
 | `--gt` | The page's ground truth in the format of `corrected/` (one line per manuscript line; a `;box{top}` marker before each block of a tripāṭha or pañcapāṭha page). Once per page, in the pages' order. Default `data/<ms>/corrected/<page>.txt` |
 | `--seg` | The segmentation the rows are cut from: `seg_torch` (the U-Net's, the default) or `seg` (Kraken's). A page not yet segmented so is segmented first |
 | `--model` | The recogniser: a `best.pt`, its folder, or a run's name (`pool1`, `ft6`; `LDII_19634/ft6` when several manuscripts have a run of that name) |
-| `--compare` | Optional: a second recogniser, scored alongside; its reading is shown greyed on request |
+| `--compare` | Optional, repeatable: another reading of every row, shown greyed under the model's (each with its own mistakes marked, a checkbox hides it) and scored alongside. `greedy` is the model itself without the language model: the model's reading is then underlined wherever the language model changed the greedy one, green where it mended the akṣara, red where it worsened it, grey where it changed it and it stayed wrong, and each page's card counts them. A recogniser (`LDII_19634/ft6`) is read greedily; with `+lm` it is read with the language model |
 | `--out`, `--open` | Where to write (default `data/<ms>/pagediff/<page>_<model>.html`); open it in the browser when written |
 
 How it is measured: the page is cut into rows as `predict` cuts it (block by block on a tripāṭha or pañcapāṭha page)

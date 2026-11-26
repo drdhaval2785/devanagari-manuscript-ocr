@@ -333,10 +333,45 @@ def ink_errors(net, chars, lines):
     return out
 
 
-def page_result(ms, image, pdf_page, gt_path, seg, model, other, lm=None):
-    """one page read and set against its truth"""
+def lm_effect(truth, read, greedy):
+    """Where the language model changed the greedy reading, and whether for the better. For each akṣara of the reading,
+    by position: 'mend' (now right where greedy was wrong), 'worse' (now wrong where greedy was right), 'still' (changed,
+    wrong both times); and the positions before which it dropped an akṣara of the greedy reading, likewise.
+    -> (at: {position: class}, gaps: {position: class}, counts)"""
+    _, _, ops_tr = align(truth, read)
+    _, _, ops_tg = align(truth, greedy)
+    ok_r = {j for tag, i1, i2, j1, j2 in ops_tr if tag == "equal" for j in range(j1, j2)}
+    ok_g = {j for tag, i1, i2, j1, j2 in ops_tg if tag == "equal" for j in range(j1, j2)}
+    r_missing = {j1 for tag, i1, i2, j1, j2 in ops_tr if tag == "delete"}     # before these read positions the truth has more
+    g_missing = {j1 for tag, i1, i2, j1, j2 in ops_tg if tag == "delete"}
+    _, _, ops_gr = align(greedy, read)
+    at, gaps, counts = {}, {}, collections.Counter()
+    for tag, i1, i2, j1, j2 in ops_gr:
+        if tag == "equal":
+            continue
+        r_ok = all(j in ok_r for j in range(j1, j2))
+        g_ok = all(i in ok_g for i in range(i1, i2))
+        if tag == "delete":                       # the reading dropped akṣaras the greedy one had
+            cls = "worse" if g_ok else ("still" if j1 in r_missing else "mend")
+            gaps[j1] = cls
+        elif tag == "insert":                     # the reading has akṣaras the greedy one had not
+            cls = "mend" if r_ok else ("still" if i1 in g_missing else "worse")
+        else:
+            cls = "mend" if r_ok else ("worse" if g_ok else "still")
+        for j in range(j1, j2):
+            at[j] = cls
+        counts[cls] += max(i2 - i1, j2 - j1)
+    return at, gaps, counts
+
+
+def page_result(ms, image, pdf_page, gt_path, seg, model, others, lm=None):
+    """one page read and set against its truth; `others` are further readings of every row, shown greyed and scored
+    alongside: [{net, chars, name, label, lm, kind}], kind 'greedy' being the same model read without the language
+    model, against which the model's effect on each akṣara is marked"""
     from .predict import read_line
     net, chars, name = model
+    others = others or []
+    greedy_i = next((k for k, o in enumerate(others) if o.get("kind") == "greedy"), None)
     stem = image.rsplit(".", 1)[0]
     truth = pagetext.read(gt_path)
     with tempfile.TemporaryDirectory() as t:
@@ -360,20 +395,24 @@ def page_result(ms, image, pdf_page, gt_path, seg, model, other, lm=None):
                     base, poly = geo[box][i]
                     ln.update(read=got[i]["text"], conf=got[i]["conf"], crop=crop,
                               base=[list(map(float, p)) for p in base], poly=[list(map(float, p)) for p in poly])
-                    if other:
-                        ln["other"] = read_line(other[0], other[1], crop, lm)[0]
+                    ln["others"] = [read_line(o["net"], o["chars"], crop, o["lm"])[0] for o in others]
                 if j is not None:
                     ln["truth"] = want[j]
                 lines.append(ln)
     errors = collections.Counter()
+    lm_counts = collections.Counter()
     for ln in lines:
         if ln.get("truth") and "read" in ln:
             ln["a"], ln["b"], ln["ops"] = align(ln["truth"], ln["read"])
             ln["dist"], ln["len"] = Levenshtein.distance(ln["read"], ln["truth"]), len(ln["truth"])
             ln["adist"], ln["alen"] = aksara_errors(ln["read"], ln["truth"])
             ln["cer"] = 100 * ln["dist"] / ln["len"]
-            if other:
-                ln["dist_o"] = Levenshtein.distance(ln["other"], ln["truth"])
+            ln["dist_o"] = [Levenshtein.distance(t, ln["truth"]) for t in ln["others"]]
+            ln["ops_o"] = [align(ln["truth"], t) for t in ln["others"]]
+            if greedy_i is not None:
+                at, gaps, counts = lm_effect(ln["truth"], ln["read"], ln["others"][greedy_i])
+                ln["lm"] = {"at": at, "gaps": gaps, "counts": counts}
+                lm_counts.update(counts)
             ln["changes"] = []
             for k, (tag, i1, i2, j1, j2) in enumerate(ln["ops"]):
                 if tag != "equal":
@@ -388,18 +427,20 @@ def page_result(ms, image, pdf_page, gt_path, seg, model, other, lm=None):
         ln["hints"] = (oddities(ln["truth"]) if ln.get("truth") else []) + hints.get(id(ln), [])
     scored = [ln for ln in lines if "dist" in ln]
     chars_ = sum(ln["len"] for ln in scored)
+    aks = sum(ln["alen"] for ln in scored)
     res = {"ms": ms, "image": image, "stem": stem, "pdf_page": pdf_page, "gt": str(gt_path), "size": size, "note": note,
            "warn": warn, "problems": problems, "lines": lines, "rects": rects, "kinds": dict(errors),
            "cer": 100 * sum(ln["dist"] for ln in scored) / max(1, chars_), "chars": chars_, "n_scored": len(scored),
-           "ger": 100 * sum(ln["adist"] for ln in scored) / max(1, sum(ln["alen"] for ln in scored)),
-           "aksaras": sum(ln["alen"] for ln in scored),
+           "ger": 100 * sum(ln["adist"] for ln in scored) / max(1, aks),
+           "aksaras": aks,
            "unpaired_rows": sum(1 for ln in lines if "read" in ln and not ln.get("truth") and ln.get("line") is None),
            "unpaired_lines": [ln for ln in lines if ln.get("truth") and "read" not in ln],
            "ink": ink_errors(net, chars, lines), "not_text": stem in not_text(ms)}
-    if other:
-        res["cer_o"] = 100 * sum(ln["dist_o"] for ln in scored) / max(1, chars_)
-        res["ger_o"] = 100 * sum(aksara_errors(ln["other"], ln["truth"])[0] for ln in scored) / max(1, res["aksaras"])
-        res["ink_o"] = ink_errors(other[0], other[1], lines)
+    res["cer_o"] = [100 * sum(ln["dist_o"][k] for ln in scored) / max(1, chars_) for k in range(len(others))]
+    res["ger_o"] = [100 * sum(aksara_errors(ln["others"][k], ln["truth"])[0] for ln in scored) / max(1, aks) for k in range(len(others))]
+    res["ink_o"] = [res["ink"] if o.get("kind") == "greedy" else ink_errors(o["net"], o["chars"], lines) for o in others]
+    if greedy_i is not None:
+        res["lm"] = dict(lm_counts)
     return res
 
 
@@ -423,18 +464,40 @@ def tone(c):
     return "good" if c <= 2 else "fair" if c <= 8 else "poor"
 
 
-def diff_rows(ln):
-    a, b = ln["a"], ln["b"]
+def diff_rows(a, b, ops, lm=None):
+    """the truth's row and a reading's, the reading's mistakes marked (orange, red, blue) and, with lm = {at, gaps},
+    the language model's changes underlined (green mended, red worsened, grey changed but still wrong)"""
+    at, gaps = (lm["at"], lm["gaps"]) if lm else ({}, {})
     t, r = [], []
-    for k, (tag, i1, i2, j1, j2) in enumerate(ln["ops"]):
-        ts, rs = "".join(a[i1:i2]), "".join(b[j1:j2])
+    LM = {"mend": "lm-mend", "worse": "lm-worse", "still": "lm-still"}
+
+    def runs(j1, j2):
+        """the reading's akṣaras j1..j2 grouped by the model's verdict on them"""
+        out, j = [], j1
+        while j < j2:
+            k = j
+            while k < j2 and at.get(k) == at.get(j):
+                k += 1
+            out.append(("".join(b[j:k]), LM.get(at.get(j), "")))
+            j = k
+        return out
+
+    def gap_mark(j):
+        return f'<span class="gap {LM[gaps[j]]}" title="an akṣara of the greedy reading dropped here"></span>' if j in gaps else ""
+
+    for k, (tag, i1, i2, j1, j2) in enumerate(ops):
+        ts = "".join(a[i1:i2])
         if tag == "equal":
             t.append(esc(ts))
-            r.append(esc(rs))
+            r.append(gap_mark(j1) + "".join(f'<span class="{c}">{esc(x)}</span>' if c else esc(x) for x, c in runs(j1, j2)))
             continue
         cls = {"replace": "d-sub", "delete": "d-miss", "insert": "d-extra"}[tag]
         t.append(f'<mark class="{cls}" data-k="{k}">{esc(ts)}</mark>' if ts else f'<span class="gap" data-k="{k}"></span>')
-        r.append(f'<mark class="{cls}" data-k="{k}">{esc(rs)}</mark>' if rs else f'<span class="gap" data-k="{k}"></span>')
+        if j2 > j1:
+            r.append(gap_mark(j1) + "".join(f'<mark class="{cls} {c}" data-k="{k}">{esc(x)}</mark>' for x, c in runs(j1, j2)))
+        else:
+            r.append(f'<span class="gap{" " + LM[gaps[j1]] if j1 in gaps else ""}" data-k="{k}"></span>')
+    r.append(gap_mark(len(b)))
     return "".join(t), "".join(r)
 
 
@@ -448,7 +511,8 @@ def pct(eb):
 
 
 def page_html(results, meta):
-    name, oname = meta["model"], meta.get("other")
+    name, onames = meta["model"], meta.get("others") or []
+    study = meta.get("lm_study")              # the greedy reading among the comparisons: the model's effect is marked
     cards, sections, hint_items = [], [], []
     top = collections.Counter()
     for p in results:
@@ -462,9 +526,16 @@ def page_html(results, meta):
         ink_line = ""
         if red_share >= 0.03:
             ink_line = (f'<div class="sub">Errors per character in <b class="redink">red ink</b> {pct(ink["red"])}, in black '
-                        f'{pct(ink["black"])}' + (f' ({esc(oname)}: {pct(p["ink_o"]["red"])} and {pct(p["ink_o"]["black"])})' if oname else "")
+                        f'{pct(ink["black"])}' + "".join(f' ({esc(o)}: {pct(io["red"])} and {pct(io["black"])})' for o, io in zip(onames, p["ink_o"]))
                         + f'; {100 * red_share:.0f} % of the characters are red.</div>')
-        before = (f'<span class="was" title="{esc(oname)}">{p["cer_o"]:.2f}</span><span class="arrow">→</span>' if oname else "")
+        before = "".join(f'<span class="was" title="{esc(o)}">{c:.2f}</span>' for o, c in zip(onames, p["cer_o"])) + ('<span class="arrow">→</span>' if onames else "")
+        before_g = "".join(f'<span class="was" title="{esc(o)}">{g:.2f}</span>' for o, g in zip(onames, p["ger_o"])) + ('<span class="arrow">→</span>' if onames else "")
+        effect = ""
+        if study and "lm" in p:
+            e = p["lm"]
+            effect = (f'<div class="sub lmfx">The language model <b class="mend">mended {e.get("mend", 0)}</b> akṣaras of the greedy reading, '
+                      f'<b class="worse">worsened {e.get("worse", 0)}</b>, changed {e.get("still", 0)} that stayed wrong: '
+                      f'<b>{e.get("mend", 0) - e.get("worse", 0):+d}</b> net.</div>')
         warn = "".join(f'<div class="sub warnline">{esc(x)}</div>' for x in p["problems"])
         if p["unpaired_lines"]:
             n = sum(len(ln["truth"]) for ln in p["unpaired_lines"])
@@ -474,9 +545,9 @@ def page_html(results, meta):
         cards.append(f"""
 <a class="card" href="#{pid}">
   <div class="card-head"><span class="ms">{esc(p['ms'])} · PDF page {p['pdf_page']}</span><span class="pg">folio {folio}, side {esc(side)}</span></div>
-  <div class="big">{before}<span class="now">{p['cer']:.2f}<small>% CER{' · ' + esc(name) if oname else ''}</small></span></div>
-  <div class="ger">{(f'<span class="was">{p["ger_o"]:.2f}</span><span class="arrow">→</span>' if oname else '')}<b>{p['ger']:.2f}</b><small>% GER, in akṣaras</small></div>
-  <div class="sub">{p['n_scored']} lines scored · {p['chars']} characters, {p['aksaras']} akṣaras · {errs} akṣaras read wrong, missed or added</div>
+  <div class="big">{before}<span class="now">{p['cer']:.2f}<small>% CER{' · ' + esc(name) if onames else ''}</small></span></div>
+  <div class="ger">{before_g}<b>{p['ger']:.2f}</b><small>% GER, in akṣaras{(' · struck through: ' + ', '.join(esc(o) for o in onames)) if onames else ''}</small></div>
+  <div class="sub">{p['n_scored']} lines scored · {p['chars']} characters, {p['aksaras']} akṣaras · {errs} akṣaras read wrong, missed or added</div>{effect}
   <div class="bar">{bar}</div>
   <ul class="legend">{legend}</ul>
   {ink_line}{warn}
@@ -505,13 +576,19 @@ def page_html(results, meta):
                 where = f"row {label(ln)}" if ln.get("row") else f"line {label(ln, 'line')}"
                 hint_items.append(f'<li><a href="#{lid}">{esc(p["stem"])} {where}</a>: {esc(x)}</li>')
             if scored:
-                t, r = diff_rows(ln)
+                t, r = diff_rows(ln["a"], ln["b"], ln["ops"], ln.get("lm"))
                 ch = " ".join(f'<span class="chg k-{c["kind"]}" data-k="{c["k"]}" title="{KINDS[c["kind"]]}">'
                               f'{esc(c["t"]) or "∅"}<i>→</i>{esc(c["r"]) or "∅"}</span>' for c in ln["changes"])
-                other = (f'<div class="txt oth"><span class="lab">{esc(oname)}</span><span class="deva">{esc(ln["other"])}</span></div>'
-                         if oname else "")
+                # the other readings, greyed, each with its own mistakes marked (their marks do not pair with the truth row's)
+                other = "".join(f'<div class="txt oth oth-{k}"><span class="lab">{esc(o)}</span><span class="deva">{diff_rows(oa, ob, oops)[1].replace(" data-k=", " data-o=")}</span></div>'
+                                for k, (o, (oa, ob, oops)) in enumerate(zip(onames, ln["ops_o"])))
+                fx = ""
+                if ln.get("lm"):
+                    c = ln["lm"]["counts"]
+                    fx = "".join(f' · <b class="{cls}">{c[cls]} {word}</b>' for cls, word in (("mend", "mended"), ("worse", "worsened"), ("still", "still wrong")) if c.get(cls))
                 head = (f'<span class="pill {t_}">{ln["cer"]:.1f} %</span><span class="dim">{ln["dist"]} of {ln["len"]} characters, '
-                        f'{ln["adist"]} of {ln["alen"]} akṣaras · confidence {ln["conf"]:.0f}' + (f' · {esc(oname)} {100 * ln["dist_o"] / ln["len"]:.1f} %' if oname else "") + "</span>")
+                        f'{ln["adist"]} of {ln["alen"]} akṣaras · confidence {ln["conf"]:.0f}'
+                        + "".join(f' · {esc(o)} {100 * d / ln["len"]:.1f} %' for o, d in zip(onames, ln["dist_o"])) + fx + "</span>")
                 body = (f'<div class="txt"><span class="lab">truth</span><span class="deva">{t}</span></div>'
                         f'<div class="txt"><span class="lab">{esc(name)}</span><span class="deva">{r}</span></div>{other}'
                         + (f'<div class="chgs">{ch}</div>' if ch else ""))
@@ -532,7 +609,7 @@ def page_html(results, meta):
         rowwarn = f'<p class="warnbox">Row finder: {esc(p["warn"])}</p>' if p["warn"] else ""
         sections.append(f"""
 <section class="pg-sec" id="{pid}">
-  <h2>{esc(p['ms'])} · PDF page {p['pdf_page']} <span class="dim">· {esc(p['stem'])} · {p['cer']:.2f} % CER, {p['ger']:.2f} % GER{f" ({esc(oname)} {p['cer_o']:.2f} %, {p['ger_o']:.2f} %)" if oname else ""}</span></h2>
+  <h2>{esc(p['ms'])} · PDF page {p['pdf_page']} <span class="dim">· {esc(p['stem'])} · {p['cer']:.2f} % CER, {p['ger']:.2f} % GER{"".join(f" · {esc(o)} {c:.2f} %, {g:.2f} %" for o, c, g in zip(onames, p['cer_o'], p['ger_o']))}</span></h2>
   <p class="dim small">Rows from {esc(meta['seg'])}: {esc(p['note'] or '')}. Ground truth: {esc(p['gt'])}. Each outline is the band
   cut out and read; click one to go to its line.</p>{rowwarn}
   <figure class="page"><div class="pagewrap" style="aspect-ratio:{w}/{h}">
@@ -548,18 +625,24 @@ def page_html(results, meta):
              f'<ul class="checks">{"".join(hint_items)}</ul>') if hint_items else ""
     info = (f'<dl class="info"><dt>manuscript</dt><dd>{esc(meta["ms"])}{" · PDF of " + str(meta["pdf_pages"]) + " pages" if meta["pdf_pages"] else ""}</dd>'
             f'<dt>segmentation</dt><dd>{esc(meta["seg"])}</dd><dt>model</dt><dd>{esc(meta["model_label"])}</dd>'
-            + (f'<dt>compared with</dt><dd>{esc(meta["other_label"])}</dd>' if oname else "")
+            + "".join(f'<dt>{"compared with" if k == 0 else ""}</dt><dd>{esc(o)}: {esc(l)}</dd>' for k, (o, l) in enumerate(zip(onames, meta.get("other_labels") or [])))
             + f'<dt>made</dt><dd>{esc(meta["when"])} by msocr.pagediff</dd></dl>')
     pages = (f"PDF page {results[0]['pdf_page']}" if len(results) == 1 else f"{len(results)} pages")
     title = f"{meta['ms']} {pages} · {name}"
     toggles = ('<label><input type="checkbox" id="oe"> only lines with mistakes</label>'
-               + (f'<label><input type="checkbox" id="oth"> also show {esc(oname)}\'s reading</label>' if oname else "")
+               + "".join(f'<label><input type="checkbox" data-oth="{k}" checked> show {esc(o)}</label>' for k, o in enumerate(onames))
                + ('<span class="dim">Go to:</span> ' + " · ".join(f'<a href="#{p["stem"]}">PDF page {p["pdf_page"]}</a>' for p in results)
                   if len(results) > 1 else ""))
     return (TEMPLATE.replace("{{TITLE}}", esc(title)).replace("{{H1}}", esc(f"{meta['ms']} {pages}, read by {name}"))
             .replace("{{INFO}}", info).replace("{{CARDS}}", "".join(cards)).replace("{{HINTS}}", hints)
             .replace("{{CHIPS}}", f'<h3>Mistakes made more than once</h3><div class="chgs">{chips}</div>' if chips else "")
-            .replace("{{TOGGLES}}", toggles).replace("{{SECTIONS}}", "".join(sections)).replace("{{MODEL}}", esc(name)))
+            .replace("{{TOGGLES}}", toggles).replace("{{SECTIONS}}", "".join(sections)).replace("{{MODEL}}", esc(name))
+            .replace("{{LMHOW}}", ('<p>Underlined in the model\'s reading, where the language model changed the greedy reading: '
+                                   '<span class="lm-mend">green</span>, it mended the akṣara (greedy had it wrong); <span class="lm-worse">red</span>, '
+                                   'it worsened it (greedy had it right); <span class="lm-still">grey</span>, changed but still wrong; a thin '
+                                   '<span class="gap lm-mend"></span> or <span class="gap lm-worse"></span> bar, an akṣara of the greedy reading dropped '
+                                   'there, rightly or wrongly. The greyed rows below each reading are the comparisons, each with its own mistakes '
+                                   'marked.</p>') if study else ""))
 
 
 TEMPLATE = r"""<!doctype html>
@@ -586,6 +669,7 @@ h1{font-size:26px;margin:0 0 4px} h2{font-size:20px;margin:40px 0 6px} h3{font-s
 .card-head{display:flex;justify-content:space-between;gap:8px;font-weight:600}.pg{color:var(--dim);font-weight:400}
 .big{font-size:30px;font-weight:650;margin:6px 0 2px;font-variant-numeric:tabular-nums}.was{color:var(--dim);font-size:20px;text-decoration:line-through}
 .arrow{color:var(--dim);font-size:18px;margin:0 6px}.big small{font-size:13px;color:var(--dim);font-weight:400;margin-left:4px}
+.was+.was{margin-left:10px}
 .ger{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;margin:0 0 2px}.ger .was{font-size:14px}.ger small{font-size:12.5px;color:var(--dim);font-weight:400;margin-left:4px}
 .sub{font-size:13px;color:var(--dim);margin:4px 0}.sub b{color:var(--ink)}.warnline{color:var(--poor)}.redink{color:#c0392b !important}
 .bar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:10px 0 6px;gap:2px}.seg{display:block}
@@ -598,6 +682,10 @@ mark.d-sub{background:var(--sub);box-shadow:inset 0 -2px var(--subb)}mark.d-miss
 mark.d-extra{background:var(--extra);box-shadow:inset 0 -2px var(--extrab)}
 .gap{display:inline-block;width:3px;height:1.1em;vertical-align:-3px;margin:0 2px;background:var(--dim);border-radius:1px}
 mark.hot,.gap.hot,.chg.hot{outline:2px solid var(--accent);outline-offset:1px}
+.lm-mend,.lm-worse,.lm-still{text-decoration:underline;text-decoration-thickness:3px;text-underline-offset:5px}
+.lm-mend{text-decoration-color:var(--good)}.lm-worse{text-decoration-color:var(--poor)}.lm-still{text-decoration-color:var(--none)}
+.gap.lm-mend{background:var(--good);width:5px}.gap.lm-worse{background:var(--poor);width:5px}.gap.lm-still{background:var(--none);width:5px}
+b.mend{color:var(--good)}b.worse{color:var(--poor)}.lmfx{color:var(--ink)}
 .checks{margin:6px 0 10px;padding-left:20px;max-width:62em}.checks li{margin:4px 0}.checks a{color:var(--accent)}
 .page{margin:12px 0 18px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px}
 .pagewrap{position:relative;width:100%}
@@ -620,7 +708,7 @@ mark.hot,.gap.hot,.chg.hot{outline:2px solid var(--accent);outline-offset:1px}
 .crop{display:block;width:100%;height:auto;border-radius:4px;background:#fff;margin:2px 0 4px}
 .txt{display:flex;gap:10px;align-items:baseline}.lab{flex:none;width:4.2em;font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;overflow-wrap:anywhere}
 .txt .deva{overflow-wrap:anywhere}
-.oth{display:none}body.show-oth .oth{display:flex}.oth .deva{color:var(--dim)}
+.oth{display:flex}.oth.off{display:none}.oth .deva{color:var(--dim)}.oth mark{opacity:.75}
 body.only-errors .line.clean{display:none}
 .chgs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
 .chg{font-family:"Tiro Devanagari Sanskrit","Kohinoor Devanagari","Devanagari Sangam MN",serif;font-size:17px;border-radius:6px;padding:0 8px;
@@ -645,6 +733,7 @@ body.only-errors .line.clean{display:none}
 extra akṣara. Hover over a marked akṣara or a change to see its partner. Spaces are taken out of both before comparing,
 as in training; CER is edits per 100 characters of the truth, GER per 100 akṣaras (an akṣara read wrong in any part
 is one error; msocr/aksara.py).</p>
+{{LMHOW}}
 <p>Kinds: <b>letters</b>, a different consonant or conjunct; <b>vowel sign / anusvāra</b>, the same consonants with other
 marks; <b>first or last akṣara</b>, an error at either end of a line, where a crop may cut into the letters;
 <b>daṇḍa or numeral</b>.</p>
@@ -657,7 +746,8 @@ marks; <b>first or last akṣara</b>, an error at either end of a line, where a 
 <script>
 const $ = (s, r = document) => [...r.querySelectorAll(s)];
 const box = (id, cls) => { const e = document.getElementById(id); if (e) e.onchange = () => document.body.classList.toggle(cls, e.checked); };
-box('oe', 'only-errors'); box('oth', 'show-oth');
+box('oe', 'only-errors');
+for (const e of $('[data-oth]')) e.onchange = () => $('.oth-' + e.dataset.oth).forEach((x) => x.classList.toggle('off', !e.checked));
 for (const sec of $('.pg-sec')) {
   const rowOf = (n) => sec.querySelector(`.row[data-n="${n}"]`), lineOf = (n) => sec.querySelector(`.line[data-n="${n}"]`);
   for (const g of $('.row', sec)) {
@@ -682,6 +772,9 @@ for (const sec of $('.pg-sec')) {
 
 
 def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False, lm=None):
+    """compare: further readings shown greyed under the model's and scored alongside, each 'greedy' (the model itself
+    without the language model: the model's effect on every akṣara is then marked), a recogniser (read greedily), or
+    a recogniser followed by +lm (read with the language model)"""
     import datetime
     from .predict import model_label
     from .recognizer import load_model
@@ -703,25 +796,38 @@ def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False
     mp = model_path(model)
     net, chars, ck = load_model(mp)
     name = short_name(mp)
-    other, oname, olabel = None, None, None
-    if compare:
-        op = model_path(compare)
+    others = []
+    for spec in ([compare] if isinstance(compare, str) else compare) or []:
+        if spec == "greedy":
+            if lm is None:
+                print("  ! --compare greedy: the model is read greedily already (--lm none); nothing to compare")
+                continue
+            others.append({"net": net, "chars": chars, "name": f"{name} greedy", "label": "the same recogniser read greedily, without the language model", "lm": None, "kind": "greedy"})
+            continue
+        with_lm = spec.endswith("+lm")
+        op = model_path(spec[:-3] if with_lm else spec)
         onet, ochars, ock = load_model(op)
         oname = short_name(op)
         if oname == name:
-            name, oname = f"{mp.parent.parent.parent.name}/{name}", f"{op.parent.parent.parent.name}/{oname}"
-        other, olabel = (onet, ochars), model_label(op, ock)
+            oname = f"{op.parent.parent.parent.name}/{oname}"
+        others.append({"net": onet, "chars": ochars, "name": oname + (" + LM" if with_lm else ""), "lm": lm if with_lm else None, "kind": "model",
+                       "label": model_label(op, ock) + (" with the language model" if with_lm else " read greedily")})
+    if others and others[0].get("kind") != "greedy" and any(o.get("kind") == "greedy" for o in others):
+        others.sort(key=lambda o: o.get("kind") != "greedy")      # the greedy reading first, right under the model's
+    onames = [o["name"] for o in others]
     results = []
     for (image, n), g in zip(chosen, gts):
-        r = page_result(ms, image, n, g, seg, (net, chars, name), other, lm)
+        r = page_result(ms, image, n, g, seg, (net, chars, name), others, lm)
         results.append(r)
-        extra = f" ({oname} {r['cer_o']:.2f} %)" if other else ""
+        extra = "".join(f" ({o} {c:.2f} %)" for o, c in zip(onames, r["cer_o"]))
         unp = f"; {r['unpaired_rows']} rows and {len(r['unpaired_lines'])} lines unpaired" if r["problems"] else ""
-        extra += f", GER {r['ger']:.2f} %" + (f" ({oname} {r['ger_o']:.2f} %)" if other else "")
-        print(f"[pagediff] {ms} PDF page {n} = {image[:-4]}: {r['cer']:.2f} % CER{extra} over {r['n_scored']} lines{unp}; "
+        extra += f", GER {r['ger']:.2f} %" + "".join(f" ({o} {g_:.2f} %)" for o, g_ in zip(onames, r["ger_o"]))
+        fx = f"; the language model mended {r['lm'].get('mend', 0)} akṣaras, worsened {r['lm'].get('worse', 0)}" if "lm" in r else ""
+        print(f"[pagediff] {ms} PDF page {n} = {image[:-4]}: {r['cer']:.2f} % CER{extra} over {r['n_scored']} lines{unp}{fx}; "
               f"{sum(len(ln['hints']) for ln in r['lines'])} hints for the truth")
-    meta = {"ms": ms, "seg": seg, "model": name, "model_label": model_label(mp, ck) + (" + language model " + ", ".join(f"{l.name} {w:.1f}" for l, w in lm.parts) if lm else " (greedy, no language model)"), "other": oname,
-            "other_label": olabel, "pdf_pages": count, "when": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+    meta = {"ms": ms, "seg": seg, "model": name, "model_label": model_label(mp, ck) + (" + language model " + ", ".join(f"{l.name} {w:.1f}" for l, w in lm.parts) if lm else " (greedy, no language model)"),
+            "others": onames, "other_labels": [o["label"] for o in others], "lm_study": any(o.get("kind") == "greedy" for o in others),
+            "pdf_pages": count, "when": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
     if out is None:
         first = chosen[0][0][:-4]
         tag = first if len(chosen) == 1 else f"{first}+{len(chosen) - 1}"
@@ -743,7 +849,9 @@ def main():
     ap.add_argument("--gt", action="append", help="the page's ground truth (corrected/ format); once per page, in order. "
                     "Default data/<ms>/corrected/<page>.txt")
     ap.add_argument("--seg", help=f"segmentation to cut rows from: seg_torch (U-Net), seg (Kraken) ... (default {DEFAULT_SEG})")
-    ap.add_argument("--compare", help="a second recogniser, shown greyed and scored alongside")
+    ap.add_argument("--compare", action="append", help="another reading of every row, shown greyed under the model's and scored alongside; "
+                    "may be given several times: 'greedy' (the model itself without the language model: what the model mended "
+                    "and what it worsened is then marked), a recogniser (read greedily), or a recogniser +lm (e.g. LDII_19634/ft6+lm)")
     ap.add_argument("--out", help="the HTML file (default data/<ms>/pagediff/<page>_<model>.html)")
     ap.add_argument("--open", action="store_true", help="open the page in the browser when written")
     ap.add_argument("--lm", help="a language model build (default the newest under data/lm), or 'none' to read greedily")
