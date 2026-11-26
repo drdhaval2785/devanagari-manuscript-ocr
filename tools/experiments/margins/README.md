@@ -42,6 +42,17 @@ All 40 pages are ruled at both margins.
    0.15 pitch instead of 0.25: no better.
 5. What remains is the ends being harder anyway: squeezed letters, worn leaf edges, context on one side only.
 
+## After the corrections (2026-11-26, evening)
+
+The truths of LDII_4278 and LDII_82320 were mended at the margins. `scan.py` then read all 40 pages again as pagediff
+reads them (rows a quarter pitch wider, pool1 and ft6, both with the language model) and listed every line end where a
+reading has letters before the truth's first akṣara or after its last: 16 of 1,300 ends (`results/scan.json`), none
+on LDII_4278. Looked at in the page image with the neighbouring lines' truths, 15 are misreads that the alignment
+counts as extra (ः read as ।, a rule read as a letter, a conjunct split in two), the truth joining the next line's
+start into a word (कर|णः, पृ|षोदरादि, कार्त्तां|तिकः, ध|न्वी). One is worth a look: 006487_00031_1 line 7, right end:
+a vowel stroke after ज against the rule, the truth ending मार्ज and the next line starting रा (मार्जारः?).
+A drop that neither model reads (a letter cut too far to be read) would not be found this way.
+
 ## What follows
 
 - The two pages' truths (finding 3) need their missing akṣaras; until then pagediff counts correct readings there as
@@ -57,6 +68,7 @@ All 40 pages are ruled at both margins.
 - `edges.py`: each line read from both segmentations; where its errors fall; what the cut does at each end.
 - `summarize.py`: the tables of `results/edges_pool1.txt` and `results/edges_ft6.txt`.
 - `inherited.py`: ends where today's reading runs further than the truth and the draft stopped where the truth stops.
+- `scan.py`: line ends the truth may have dropped, on every page, by two recognisers with the wide cut.
 - `variants.py`, `summarize_variants.py`: the cut as now, padded with paper, a quarter (or `--frac`) pitch wider, wider
   with the rule erased (`results/variants_025.txt`, `results/variants_015.txt`).
 - The raw records (`results/*.jsonl`) are not kept in git: `edges.py` and `variants.py` remake them in a few minutes.
