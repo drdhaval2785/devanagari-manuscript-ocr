@@ -42,7 +42,7 @@ from .config import DATA, MANUSCRIPTS, SEG, ms_dir, not_text
 from .recognizer import load_model, to_tensor
 from .segment import cut_from, ensure_segmented, page_seg, pin, reading_from
 
-DEFAULT_MODEL = DATA / "LDII_85885" / "models" / "run3" / "best.pt"
+DEFAULT_MODEL = DATA / "pool" / "models" / "pool2" / "best.pt"     # pooled over ten hands (0.13.2); run3 read LDII_85885 alone
 
 
 def read_line(net, chars, crop, lm=None):

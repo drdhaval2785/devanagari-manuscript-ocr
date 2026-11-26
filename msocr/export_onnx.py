@@ -1,6 +1,6 @@
 """The export contract: a model pack for Manuscribe (and anything else reading the reference pipeline's networks).
 
-    .venv-onnx/bin/python -m msocr.export_onnx [--seg tseg1] [--rec data/LDII_19634/models/ft4/best.pt] [--spacer full_e10_s1]
+    .venv-onnx/bin/python -m msocr.export_onnx [--seg tseg1] [--rec data/pool/models/pool2/best.pt] [--spacer full_e10_s1]
 
 -> data/model_pack/<pack>/ (pack = pack-<date>-p<pipeline version>-s<spacer version>; a second pack made the same day is
    pack-<date>b-..., a third pack-<date>c-..., so that no pack a browser may keep is ever replaced under its own name;
@@ -82,7 +82,7 @@ def export_dynamic(net, path, max_len):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seg", default="tseg1")
-    ap.add_argument("--rec", default=str(DATA / "LDII_19634" / "models" / "ft4" / "best.pt"))
+    ap.add_argument("--rec", default=str(DATA / "pool" / "models" / "pool2" / "best.pt"))
     ap.add_argument("--spacer", default="full_e10_s1")
     ap.add_argument("--overwrite", action="store_true", help="make the day's pack again under its own name")
     ap.add_argument("--lm", help="the language model build to put in the pack (data/lm/<build>; default the newest; 'none' for none)")

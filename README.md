@@ -19,8 +19,10 @@ makes are published separately under CC BY-SA 4.0.
   its TEI file is being corrected page by page with `update`.
 - Every page of the 19 linear manuscripts in the corpus is segmented and row-checked, ready to be
   read and fine-tuned on; the tripatha, panchapatha and special ones are not yet ([LAYOUTS.md](LAYOUTS.md)).
-- Five clean pages each of eight more hands (LDII_9851, 45364, 82668, 1806, 4278, 82320, 6487, 80136)
-  are read and waiting in their `to_correct/` folders; once corrected, `pool` trains on all hands at once.
+- Five corrected pages each of eight more hands (LDII_9851, 45364, 82668, 1806, 4278, 82320, 6487, 80136).
+- pool2 (0.13.2): one recogniser pooled over all ten hands, each given the same share of every pass, the default of
+  predict, pagediff, update and the packs: 3.80 % of characters wrong on the held-out last page of each manuscript,
+  2.85 % read with the language model (pool1, six hands: 5.11 % and 4.11 % on the same pages).
 
 ## Setup
 
@@ -124,7 +126,7 @@ recogniser's own probability of it at the column it aligns to.
     .venv/bin/python -m msocr.lm build                    -> data/lm/<today>/ (lexica.bin.gz, own.bin.gz, lm.json); a minute
     .venv/bin/python -m msocr.lm show                     what the newest build holds
     .venv/bin/python -m msocr.lm odds अमृत असृत            which the model prefers, and by how much
-    .venv/bin/python -m msocr.predict LDII_45364 --start 1 --pages 20 --model data/pool/models/pool1/best.pt [--lm none]
+    .venv/bin/python -m msocr.predict LDII_45364 --start 1 --pages 20 [--model data/pool/models/pool2/best.pt] [--lm none]
 
 The newest build under `data/lm/` is used unless `--lm <build>` names another or `--lm none` reads greedily;
 `export_onnx` puts the build's two files in the pack (`manifest.lm`), `msocr.site` carries them to the site and the
@@ -207,7 +209,7 @@ where a model goes wrong on a hand, and where the truth itself may need a second
 | pages | One or more: a PDF page number (1 is the PDF's first page; the page images in name order are the PDF's pages one by one, and the PDF's page count is checked against them), a folio and side (`66_1`), or an image name (`009851_00066_1`) |
 | `--gt` | The page's ground truth in the format of `corrected/` (one line per manuscript line; a `;box{top}` marker before each block of a tripāṭha or pañcapāṭha page). Once per page, in the pages' order. Default `data/<ms>/corrected/<page>.txt` |
 | `--seg` | The segmentation the rows are cut from: `seg_torch` (the U-Net's, the default) or `seg` (Kraken's). A page not yet segmented so is segmented first |
-| `--model` | The recogniser: a `best.pt`, its folder, or a run's name (`pool1`, `ft6`; `LDII_19634/ft6` when several manuscripts have a run of that name) |
+| `--model` | The recogniser: a `best.pt`, its folder, or a run's name (`pool2`, `ft6`; `LDII_19634/ft6` when several manuscripts have a run of that name). Default predict's, pool2 |
 | `--compare` | Optional, repeatable: another reading of every row, shown greyed under the model's (each with its own mistakes marked, a checkbox hides it) and scored alongside. `greedy` is the model itself without the language model: the model's reading is then underlined wherever the language model changed the greedy one, green where it mended the akṣara, red where it worsened it, grey where it changed it and it stayed wrong, and each page's card counts them. A recogniser (`LDII_19634/ft6`) is read greedily; with `+lm` it is read with the language model |
 | `--widen` | Optional: each row cut this fraction of a line pitch further at both ends than predict cuts it (`0.25`: a quarter pitch, across the rule in the margin that predict stops short of), to see the letters squeezed against a margin; the file is named `..._wide0.25.html`. The recognisers learnt rows cut short of the rule and may read it as a vowel sign or a daṇḍa (`tools/experiments/margins/`) |
 | `--out`, `--open` | Where to write (default `data/<ms>/pagediff/<page>_<model>.html`); open it in the browser when written |

@@ -64,7 +64,7 @@ def _recogniser_lineage(source):
         run_dir = p.parent
         log = run_dir / "train.log"
         ms = run_dir.parent.parent.name
-        step = {"run": run_dir.name, "manuscript": ms}
+        step = {"run": run_dir.name, "manuscript": ms}          # a pooled run (data/pool/models/<run>): its sources below
         base = None
         if log.exists():
             text = log.read_text(encoding="utf-8", errors="replace")
@@ -80,6 +80,8 @@ def _recogniser_lineage(source):
                 step["contributions"] = ck["contributions"]
             if ck.get("lines"):
                 step["lines_from"] = ck["lines"]          # seg: cut from Kraken's segmentation; seg_torch: the U-Net's
+            if ck.get("sources"):
+                step["sources"] = list(ck["sources"])     # a pooled run's manuscripts, every one given the same share a pass
         out.append(step)
         p = base
     return out
@@ -157,10 +159,15 @@ def _card_md(m):
               f"at about the median.", "", "## Recogniser", "",
               f"Characters: {m['models']['recogniser']['classes'] - 1}. Trained, run after run:", ""]
     for s in reversed(rec["lineage"]):
-        lines.append(f"- `{s['run']}` on {s['manuscript']}" + (f", {s['lines']} lines" if s.get("lines") else "")
+        on = (f"{len(s['sources'])} manuscripts at once, each given the same share of every pass: {', '.join(s['sources'])}"
+              if s.get("sources") else s["manuscript"])
+        lines.append(f"- `{s['run']}` on {on}" + (f", {s['lines']} lines" if s.get("lines") else "")
                      + (", cut from the U-Net's segmentation as Manuscribe cuts them" if s.get("lines_from") == "seg_torch" else ""))
-    lines += ["", "It reads the hands it learned from well and other hands poorly: a model pooled over many hands is "
-              "to replace it.", "", "## Word spacer", "", f"Run `{sp['run']}`, trained on {sp['texts']}. Threshold "
+    pooled = rec["lineage"] and rec["lineage"][0].get("sources")
+    lines += ["", ("It reads the hands it learned from best; a hand it has never seen reads worse, the more so the further "
+                   "that hand is from these. Pooling over more hands is what makes it read new ones better."
+                   if pooled else "It reads the hands it learned from well and other hands poorly: a model pooled over many "
+                   "hands is to replace it."), "", "## Word spacer", "", f"Run `{sp['run']}`, trained on {sp['texts']}. Threshold "
               f"{m['models']['spacer']['threshold']}.", ""]
     lm = m.get("lm")
     if lm:
@@ -174,8 +181,9 @@ def _card_md(m):
                     else "the manuscripts' own transcriptions (" + ", ".join(f"{s['manuscript']} {s['lines']}" for s in c.get("sources", [])) + " lines)")
             lines.append(f"- `{c['name']}` (weight {c['weight']}): {c['letters']:,} letters of {what}; {c['entries']:,} n-grams"
                          + (f", those seen under {c['pruned_below']} times left out" if c.get("pruned_below", 1) > 1 else "") + f"; {c['bytes'] / 1e6:.1f} MB.")
-        lines += ["", "Measured on lines never trained on (2026-11-25): about a sixth fewer character errors and a fifth fewer "
-                  "akṣara errors than reading letter by letter; daṇḍas and digits are not its business.", ""]
+        lines += ["", "Measured on lines never trained on (2026-11-26, the pooled recogniser pool2 on the last page of each of "
+                  "its ten manuscripts): a quarter fewer character errors (3.79 % to 2.85 %) and three tenths fewer akṣara "
+                  "errors (6.18 % to 4.28 %) than reading letter by letter; daṇḍas and digits are not its business.", ""]
     else:
         lines += ["## Language model", "", "None in this pack: lines are read letter by letter, as the recogniser sees them.", ""]
     lines += ["## Consent", ""]

@@ -899,7 +899,9 @@ def main():
     ap = argparse.ArgumentParser(description="A page read by a model, set against its ground truth, as an HTML page.")
     ap.add_argument("pdf", help="the manuscript: LDII_9851, LDII_9851.pdf or the PDF's path")
     ap.add_argument("pages", nargs="+", help="PDF page number (1 = first), folio_side as 66_1, or image name 009851_00066_1")
-    ap.add_argument("--model", required=True, help="recogniser: a best.pt, its folder, a run name (pool1) or owner/run (LDII_19634/ft6)")
+    from .predict import DEFAULT_MODEL
+    ap.add_argument("--model", default=str(DEFAULT_MODEL), help="recogniser: a best.pt, its folder, a run name (pool2) or owner/run "
+                    "(LDII_19634/ft6); default predict's (pool2)")
     ap.add_argument("--gt", action="append", help="the page's ground truth (corrected/ format); once per page, in order. "
                     "Default data/<ms>/corrected/<page>.txt")
     ap.add_argument("--seg", help=f"segmentation to cut rows from: seg_torch (U-Net), seg (Kraken) ... (default {DEFAULT_SEG})")
