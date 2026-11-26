@@ -15,6 +15,10 @@ Input
   Default data/<ms>/corrected/<page>.txt.
 - --seg: the segmentation to cut the rows from (default config.SEG, seg_torch: the U-Net's; seg: Kraken's). A page not
   yet segmented so is segmented first.
+- --widen: each row cut this fraction of a line pitch further at both ends than predict cuts it (0.25: a quarter pitch,
+  across a rule drawn down the margin, which predict stops short of), to see the letters squeezed against a margin
+  (tools/experiments/margins). The recognisers were trained on rows cut as predict cuts them, and may read a rule as a
+  vowel sign or a daṇḍa.
 - --model: the recogniser (a best.pt, its folder, or a run's name: pool1, ft6, or owner/run as LDII_19634/ft6, looked
   for as data/<owner>/models/<run>/best.pt). --compare: a second one, whose reading is shown greyed and scored too.
 
@@ -31,8 +35,10 @@ What is done
   consonants with other vowel signs or anusvāra, an error at either end of a line, a daṇḍa or numeral.
 - Errors per character in red ink against black, where a page has red ink (the colour under each character, from
   where along the line the model read it).
-- Hints for the truth: two vowel signs in a row, a virama after a vowel sign, a Latin letter or digit; and a numeral
-  that breaks the page's count or verse numbering where the model read the number that would continue it.
+- Hints for the truth: two vowel signs in a row, a virama after a vowel sign, a Latin letter or digit; a numeral
+  that breaks the page's count or verse numbering where the model read the number that would continue it; and a line
+  the model read further than the truth goes, at its start or its end (letters left out of the truth at a margin,
+  or a rule or a mark read as letters).
 
 Output: data/<ms>/pagediff/<page>_<model>.html (--out to choose), one file with the images inside; --open shows it.
 """
@@ -232,6 +238,30 @@ def deva(n):
     return "".join(chr(0x966 + int(c)) for c in str(n))
 
 
+def end_hints(lines, model):
+    """lines the model read further than the truth goes, at the start or at the end: the akṣaras it read before the
+    truth's first one it matched, or after its last, where the truth has none (only akṣaras with a letter in them;
+    a daṇḍa or a lone mark is more likely a rule or a speck read)"""
+    hints = collections.defaultdict(list)
+    letter = lambda x: any(c not in PUNCT and c not in MARK and c != VIRAMA for c in x)       # noqa: E731
+    for ln in lines:
+        if not ln.get("truth") or "read" not in ln or not ln.get("ops"):
+            continue
+        a, b, ops = ln["a"], ln["b"], ln["ops"]
+        eq = [o for o in ops if o[0] == "equal"]
+        if not eq:
+            continue
+        lead = b[:max(0, eq[0][3] - eq[0][1])]                       # the reading's first akṣaras beyond the truth's
+        trail = b[eq[-1][4]:][len(a) - eq[-1][2]:]                   # its last ones
+        if lead and any(map(letter, lead)):
+            hints[id(ln)].append(f"{model} read {''.join(lead)} before the truth's first akṣara "
+                                 f"({''.join(a[:2])}…): left out of the truth at the margin?")
+        if trail and any(map(letter, trail)):
+            hints[id(ln)].append(f"{model} read {''.join(trail)} after the truth's last akṣara "
+                                 f"(…{''.join(a[-2:])}): left out of the truth at the margin?")
+    return hints
+
+
 def numbering_hints(lines, model):
     """numerals of the truth that break the page's numbering where the model read the number that continues it:
     a verse number one more than the verse before; a count one more than the count before it, or 1 (a new entry)"""
@@ -267,7 +297,25 @@ def numbering_hints(lines, model):
 # ------------------------------------------------------------------ reading a page
 
 
-def read_rows(ms, image, seg, net, chars, tmp, lm=None):
+def widen_rows(rows, frac):
+    """rows (baseline, outline) as the row finder makes them, each cut `frac` of its line pitch further at both ends
+    (the pitch from the row's band, which is ABOVE + BELOW pitches high), the end heights kept"""
+    from .align import ABOVE, BELOW
+    from .linecut import band_of
+    out = []
+    for base, poly in rows:
+        above, below = band_of(base, poly)
+        by = frac * (above + below) / (ABOVE + BELOW)
+        n = len(base)
+        top, bottom = list(poly[:n]), list(poly[n:])[::-1]
+        ext = lambda pts: [(pts[0][0] - by, pts[0][1])] + list(pts) + [(pts[-1][0] + by, pts[-1][1])]   # noqa: E731
+        b2, t2, d2 = ext(base), ext(top), ext(bottom)
+        out.append(([(int(round(x)), int(round(y))) for x, y in b2],
+                    [(int(round(x)), max(0, int(round(y)))) for x, y in t2 + d2[::-1]]))
+    return out
+
+
+def read_rows(ms, image, seg, net, chars, tmp, lm=None, widen=0.0):
     """the page cut into rows as predict cuts it and each row read -> ({box: [(baseline, outline)]}, {box: rect},
     {box: [{file, text, conf}]}, size, note, warning)"""
     from .blocks import blocks_for_page, layout_of
@@ -286,6 +334,8 @@ def read_rows(ms, image, seg, net, chars, tmp, lm=None):
             geo, rects = ({"main": merged} if merged else {}), {}
         order = lambda b: pagetext.BOXES.index(b) if b in pagetext.BOXES else 99       # noqa: E731
         geo = {b: geo[b] for b in sorted(geo, key=order)}
+        if widen:
+            geo = {b: widen_rows(rows, widen) for b, rows in geo.items()}
         reads = {b: _read_rows(ms, image, size, rows, net, chars, tmp, stem, b, lm) for b, rows in geo.items()}
     return geo, rects, reads, size, note, warn
 
@@ -364,7 +414,7 @@ def lm_effect(truth, read, greedy):
     return at, gaps, counts
 
 
-def page_result(ms, image, pdf_page, gt_path, seg, model, others, lm=None):
+def page_result(ms, image, pdf_page, gt_path, seg, model, others, lm=None, widen=0.0):
     """one page read and set against its truth; `others` are further readings of every row, shown greyed and scored
     alongside: [{net, chars, name, label, lm, kind}], kind 'greedy' being the same model read without the language
     model, against which the model's effect on each akṣara is marked"""
@@ -376,7 +426,7 @@ def page_result(ms, image, pdf_page, gt_path, seg, model, others, lm=None):
     truth = pagetext.read(gt_path)
     with tempfile.TemporaryDirectory() as t:
         tmp = Path(t)
-        geo, rects, reads, size, note, warn = read_rows(ms, image, seg, net, chars, tmp, lm)
+        geo, rects, reads, size, note, warn = read_rows(ms, image, seg, net, chars, tmp, lm, widen)
         lines, problems = [], []
         for box in [b for b in pagetext.BOXES if b in geo or b in truth] + [b for b in truth if b not in pagetext.BOXES]:
             got = reads.get(box, [])
@@ -423,8 +473,9 @@ def page_result(ms, image, pdf_page, gt_path, seg, model, others, lm=None):
             ln["a"] = aksharas(ln["truth"])
             ln["ops"], ln["b"] = [], []
     hints = numbering_hints(lines, name)
+    ends = end_hints(lines, name)
     for ln in lines:
-        ln["hints"] = (oddities(ln["truth"]) if ln.get("truth") else []) + hints.get(id(ln), [])
+        ln["hints"] = (oddities(ln["truth"]) if ln.get("truth") else []) + hints.get(id(ln), []) + ends.get(id(ln), [])
     scored = [ln for ln in lines if "dist" in ln]
     chars_ = sum(ln["len"] for ln in scored)
     aks = sum(ln["alen"] for ln in scored)
@@ -610,7 +661,7 @@ def page_html(results, meta):
         sections.append(f"""
 <section class="pg-sec" id="{pid}">
   <h2>{esc(p['ms'])} · PDF page {p['pdf_page']} <span class="dim">· {esc(p['stem'])} · {p['cer']:.2f} % CER, {p['ger']:.2f} % GER{"".join(f" · {esc(o)} {c:.2f} %, {g:.2f} %" for o, c, g in zip(onames, p['cer_o'], p['ger_o']))}</span></h2>
-  <p class="dim small">Rows from {esc(meta['seg'])}: {esc(p['note'] or '')}. Ground truth: {esc(p['gt'])}. Each outline is the band
+  <p class="dim small">Rows from {esc(meta['seg'])}{" (cut " + esc(meta['cut'].split(' (')[0].replace('each row ', '')) + ")" if meta.get('cut', '').startswith('each') else ""}: {esc(p['note'] or '')}. Ground truth: {esc(p['gt'])}. Each outline is the band
   cut out and read; click one to go to its line.</p>{rowwarn}
   <figure class="page"><div class="pagewrap" style="aspect-ratio:{w}/{h}">
     <img src="{data_uri(Image.open(MANUSCRIPTS[p['ms']]['images'] / p['image']), 'JPEG', 2000)}" alt="{esc(p['stem'])}">
@@ -620,11 +671,11 @@ def page_html(results, meta):
     chips = "".join(f'<span class="chg"><span class="deva sm">{esc(t)}<i>→</i>{esc(r)}</span> <b>×{n}</b></span>'
                     for (t, r), n in top.most_common() if n >= 2)
     hints = (f'<h3>Worth checking in the ground truth</h3><p class="dim small">Found by rule, not judged: a sequence of '
-             f'letters that is rarely right, or a numeral that breaks the page\'s numbering where {esc(name)} read the '
-             f'number that continues it. Look at the line image before changing anything.</p>'
+             f'letters that is rarely right, a numeral that breaks the page\'s numbering where {esc(name)} read the '
+             f'number that continues it, or akṣaras {esc(name)} read beyond the truth\'s first or last. Look at the line image before changing anything.</p>'
              f'<ul class="checks">{"".join(hint_items)}</ul>') if hint_items else ""
     info = (f'<dl class="info"><dt>manuscript</dt><dd>{esc(meta["ms"])}{" · PDF of " + str(meta["pdf_pages"]) + " pages" if meta["pdf_pages"] else ""}</dd>'
-            f'<dt>segmentation</dt><dd>{esc(meta["seg"])}</dd><dt>model</dt><dd>{esc(meta["model_label"])}</dd>'
+            f'<dt>segmentation</dt><dd>{esc(meta["seg"])}</dd><dt>rows cut</dt><dd>{esc(meta.get("cut", ""))}</dd><dt>model</dt><dd>{esc(meta["model_label"])}</dd>'
             + "".join(f'<dt>{"compared with" if k == 0 else ""}</dt><dd>{esc(o)}: {esc(l)}</dd>' for k, (o, l) in enumerate(zip(onames, meta.get("other_labels") or [])))
             + f'<dt>made</dt><dd>{esc(meta["when"])} by msocr.pagediff</dd></dl>')
     pages = (f"PDF page {results[0]['pdf_page']}" if len(results) == 1 else f"{len(results)} pages")
@@ -771,7 +822,7 @@ for (const sec of $('.pg-sec')) {
 # ------------------------------------------------------------------ command line
 
 
-def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False, lm=None):
+def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False, lm=None, widen=0.0):
     """compare: further readings shown greyed under the model's and scored alongside, each 'greedy' (the model itself
     without the language model: the model's effect on every akṣara is then marked), a recogniser (read greedily), or
     a recogniser followed by +lm (read with the language model)"""
@@ -817,7 +868,7 @@ def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False
     onames = [o["name"] for o in others]
     results = []
     for (image, n), g in zip(chosen, gts):
-        r = page_result(ms, image, n, g, seg, (net, chars, name), others, lm)
+        r = page_result(ms, image, n, g, seg, (net, chars, name), others, lm, widen)
         results.append(r)
         extra = "".join(f" ({o} {c:.2f} %)" for o, c in zip(onames, r["cer_o"]))
         unp = f"; {r['unpaired_rows']} rows and {len(r['unpaired_lines'])} lines unpaired" if r["problems"] else ""
@@ -827,11 +878,14 @@ def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False
               f"{sum(len(ln['hints']) for ln in r['lines'])} hints for the truth")
     meta = {"ms": ms, "seg": seg, "model": name, "model_label": model_label(mp, ck) + (" + language model " + ", ".join(f"{l.name} {w:.1f}" for l, w in lm.parts) if lm else " (greedy, no language model)"),
             "others": onames, "other_labels": [o["label"] for o in others], "lm_study": any(o.get("kind") == "greedy" for o in others),
-            "pdf_pages": count, "when": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+            "pdf_pages": count, "when": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "cut": (f"each row {widen:g} of a line pitch wider at both ends than predict cuts it (across a rule in the "
+                    f"margin; the recognisers learnt rows cut short of it, and may read a rule as a vowel sign or a daṇḍa)"
+                    if widen else "as predict cuts it: the text block's width, stopping short of a rule in the margin")}
     if out is None:
         first = chosen[0][0][:-4]
         tag = first if len(chosen) == 1 else f"{first}+{len(chosen) - 1}"
-        out = ms_dir(ms) / "pagediff" / f"{tag}_{name.replace('/', '-')}.html"
+        out = ms_dir(ms) / "pagediff" / f"{tag}_{name.replace('/', '-')}{f'_wide{widen:g}' if widen else ''}.html"
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(page_html(results, meta), encoding="utf-8")
@@ -854,10 +908,12 @@ def main():
                     "and what it worsened is then marked), a recogniser (read greedily), or a recogniser +lm (e.g. LDII_19634/ft6+lm)")
     ap.add_argument("--out", help="the HTML file (default data/<ms>/pagediff/<page>_<model>.html)")
     ap.add_argument("--open", action="store_true", help="open the page in the browser when written")
+    ap.add_argument("--widen", type=float, default=0.0, help="cut each row this fraction of a line pitch further at both ends "
+                    "(0.25: across a rule in the margin), to see letters squeezed against it; the file is named _wide<frac>")
     ap.add_argument("--lm", help="a language model build (default the newest under data/lm), or 'none' to read greedily")
     a = ap.parse_args()
     from .lm import load_default
-    run(a.pdf, a.pages, a.model, a.gt, a.seg, a.compare, a.out, a.open, lm=load_default(a.lm))
+    run(a.pdf, a.pages, a.model, a.gt, a.seg, a.compare, a.out, a.open, lm=load_default(a.lm), widen=a.widen)
 
 
 if __name__ == "__main__":

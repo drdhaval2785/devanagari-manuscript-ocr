@@ -209,6 +209,7 @@ where a model goes wrong on a hand, and where the truth itself may need a second
 | `--seg` | The segmentation the rows are cut from: `seg_torch` (the U-Net's, the default) or `seg` (Kraken's). A page not yet segmented so is segmented first |
 | `--model` | The recogniser: a `best.pt`, its folder, or a run's name (`pool1`, `ft6`; `LDII_19634/ft6` when several manuscripts have a run of that name) |
 | `--compare` | Optional, repeatable: another reading of every row, shown greyed under the model's (each with its own mistakes marked, a checkbox hides it) and scored alongside. `greedy` is the model itself without the language model: the model's reading is then underlined wherever the language model changed the greedy one, green where it mended the akṣara, red where it worsened it, grey where it changed it and it stayed wrong, and each page's card counts them. A recogniser (`LDII_19634/ft6`) is read greedily; with `+lm` it is read with the language model |
+| `--widen` | Optional: each row cut this fraction of a line pitch further at both ends than predict cuts it (`0.25`: a quarter pitch, across the rule in the margin that predict stops short of), to see the letters squeezed against a margin; the file is named `..._wide0.25.html`. The recognisers learnt rows cut short of the rule and may read it as a vowel sign or a daṇḍa (`tools/experiments/margins/`) |
 | `--out`, `--open` | Where to write (default `data/<ms>/pagediff/<page>_<model>.html`); open it in the browser when written |
 
 How it is measured: the page is cut into rows as `predict` cuts it (block by block on a tripāṭha or pañcapāṭha page)
@@ -224,8 +225,9 @@ What the page shows besides the lines: the CER (edits per 100 characters of the 
 kinds (a different consonant or conjunct; the same consonants with other vowel signs or anusvāra; an error at either
 end of a line; a daṇḍa or numeral); the mistakes made more than once; errors per character in red ink against black,
 on a page with red ink; and hints for the truth, found by rule: two vowel signs in a row, a virama after a vowel sign,
-a Latin letter or digit, and a numeral that breaks the page's count or verse numbering (`॥ ७४ ॥` after `॥ ७४ ॥`) where the
-model read the number that would continue it. The HTML holds its images, so it can be moved or sent as one file
+a Latin letter or digit, a numeral that breaks the page's count or verse numbering (`॥ ७४ ॥` after `॥ ७४ ॥`) where the
+model read the number that would continue it, and a line the model read further than the truth goes at its start or
+its end (akṣaras left out of the truth at a margin, or a rule read as letters). The HTML holds its images, so it can be moved or sent as one file
 (2–3 MB a page). About 3 s a page.
 
 ## Tripāṭha and pañcapāṭha manuscripts: blocks
