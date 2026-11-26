@@ -7,12 +7,24 @@
                                                  (<pb n="0001_2"/>, <lb n="1" break="no"/> ...)
     python -m msocr.export LDII_19634 --from data/LDII_19634/LDII_19634.txt
         rebuilds the TEI file from a composite text file that has been corrected by hand
+    python -m msocr.export AKGM_0025383 --spaces
+        the same, with word spaces put in by the newest model pack's word spacer, as Manuscribe puts them in
     python -m msocr.export LDII_19634 --model data/LDII_19634/models/ft3/best.pt [--out FILE]
         reads EVERY page afresh with that model and writes the reading alone, nothing corrected,
         as a TEI file (default data/LDII_19634/LDII_19634.machine.xml): the same page and line
         breaks as above, the model named in the header. Nothing else is touched, so the file can
         be made for each model in turn and kept under version control elsewhere; the difference
         between two of them is exactly what the training changed.
+
+Word spaces (--spaces), as Manuscribe puts them in when it reads a side: each block of a page is spaced as one text,
+its lines joined with nothing between them, by the word spacer of the newest pack in data/model_pack (its spacer.onnx
+at its threshold; spacer_reference.py, beside this folder in sanskrit_spacer), and the spaces are given back to the
+lines, a space that falls between two lines ending the first. A line that ends in a space or a daṇḍa ends its word, and
+the next line opens with <lb n=".."/>; a line that does not runs on, and the next opens with <lb n=".." break="no"/>
+(Manuscribe's rule, both ways). In the text file a line that ends a word keeps one space at its end, so that
+--from FILE --spaces builds the same TEI again. A block with a space in it already (typed in a correction) keeps its
+own spaces; nothing in corrected/, to_correct/ or drafts/ is changed. Without --spaces the text is written as read,
+every line opening with break="no".
 
 For each page the text comes from the first of: corrected/<page>.txt, to_correct/<page>.txt,
 drafts/<page>.txt. Pages where no text was found (cover, blank sides) get a marker and no lines
@@ -87,7 +99,8 @@ def composite(pages):
     return "".join(parts)
 
 
-def parse_composite(text):
+def parse_composite(text, keep_end=False):
+    """keep_end: a spaced composite, whose lines that end a word end in a space"""
     pages, cur = [], None
     for raw in text.splitlines():
         m = re.fullmatch(r"\s*;p\{(\w+)\}\s*", raw)
@@ -97,8 +110,83 @@ def parse_composite(text):
         elif raw.strip():
             if cur is None:
                 raise ValueError("text before the first ;p{...} marker")
-            cur[2].append(raw.rstrip())
-    return [(pid, src, pagetext.parse("\n".join(lines))) for pid, src, lines in pages]
+            cur[2].append(re.sub(r"\s+$", " ", raw) if keep_end else raw.rstrip())
+    return [(pid, src, pagetext.parse("\n".join(lines), keep_end)) for pid, src, lines in pages]
+
+
+# ---------------------------------------------------------------- word spaces
+
+SPACER_DIR = Path(__file__).resolve().parent.parent.parent / "sanskrit_spacer"
+DANDA = "|।॥"
+
+
+def split_spaced(rows, spaced):
+    """The spaced text of a block given back to its rows (Manuscribe's RecogPage.splitSpaced, step for step): a space
+    falling between two rows ends the first; a row begins with no space and ends in one at most. -> [row text], or
+    None if the letters do not match (the rows are then left as they were)."""
+    out, pos = [], 0
+    for row in rows:
+        line = ""
+        for c in row:
+            if c.isspace():
+                continue
+            while pos < len(spaced) and spaced[pos].isspace():      # whitespace before a row's first letter ends the row before it
+                if line or not out:
+                    line += spaced[pos]
+                else:
+                    out[-1] += spaced[pos]
+                pos += 1
+            if pos >= len(spaced) or spaced[pos] != c:
+                return None
+            line += c
+            pos += 1
+        out.append(line)
+    while pos < len(spaced) and spaced[pos].isspace():
+        pos += 1
+    if pos != len(spaced):
+        return None
+    return [re.sub(r"\s+$", " ", l.lstrip()) for l in out]
+
+
+def word_spacer(pack=None):
+    """The word spacer of a model pack (the newest in data/model_pack by default), run as Manuscribe runs it.
+    -> (space(text) -> spaced text, the pack's name)"""
+    import json
+    from .config import DATA
+    pack = Path(pack) if pack else sorted(p.parent for p in (DATA / "model_pack").glob("pack-*/manifest.json"))[-1]
+    m = json.loads((pack / "manifest.json").read_text(encoding="utf-8"))
+    sys.path.insert(0, str(SPACER_DIR))
+    import spacer_reference as SR
+    if m["spacer_version"] != SR.VERSION:
+        raise SystemExit(f"{pack.name}: spacer version {m['spacer_version']}, but {SPACER_DIR / 'spacer_reference.py'} "
+                         f"is version {SR.VERSION}")
+    sp = m["models"]["spacer"]
+    net = SR.onnx_network(pack / sp["file"])
+    return (lambda text: SR.space_text(text, net, sp["threshold"])), pack.name
+
+
+def space_pages(pages, space):
+    """pages [(pid, source, {box: [lines]})] with word spaces put in, block by block -> (pages, counts)"""
+    out, n = [], {"spaced": 0, "own spaces kept": 0, "left as read": 0}
+    for pid, src, boxes in pages:
+        new = {}
+        for b, lines in boxes.items():
+            if not any(t.strip() for t in lines):
+                new[b] = lines
+            elif any(" " in t.strip() for t in lines):           # spaced by a person already
+                new[b] = lines
+                n["own spaces kept"] += 1
+            else:
+                back = split_spaced(lines, space("".join(t.strip() for t in lines)))
+                new[b] = back if back is not None else lines
+                n["spaced" if back is not None else "left as read"] += 1
+        out.append((pid, src, new))
+    return out, n
+
+
+def ends_word(t):
+    """a line ends its word: it is empty, or ends in whitespace or a daṇḍa (Manuscribe's lineEnd)"""
+    return not t.strip() or t[-1].isspace() or t.rstrip()[-1] in DANDA
 
 
 LAYOUT_LABEL = {"linear": "Linear", "tripatha": "Commentary above and below (tripāṭha)", "panchapatha": "Commentary on four sides (pañcapāṭha)"}
@@ -178,12 +266,21 @@ def _pb(pid, src):
     return f'<pb n="{pid}"' + (' level="#ocr"' if src in ("drafts", "to_correct", "machine") else "") + "/>"
 
 
-def tei(ms_id, pages, reading=None):
+def tei(ms_id, pages, reading=None, spaced=False):
     """pages: [(pid, source, {box: [lines]})]. One <div> when every page has only main text; else the
-    two streams Manuscribe writes, base-text and commentary, each with every page's <pb/>."""
+    two streams Manuscribe writes, base-text and commentary, each with every page's <pb/>. spaced: the lines carry
+    word spaces, and a line opens with break="no" only where the line before it in its stream runs on (ends_word);
+    else every line does (text as read, no word known to end)."""
     head = _machine_header(_header(ms_id, pages), reading) if reading else _header(ms_id, pages)
     out = ['<TEI xmlns="http://www.tei-c.org/ns/1.0">', head, "<text>", "<body>"]
     multi = any(set(boxes) - {"main"} for _, _, boxes in pages)
+    state = {"open": False}               # the stream's last line runs on (its word not ended)
+
+    def lbs(lines):
+        for i, t in enumerate(lines, 1):
+            brk = state["open"] if spaced else True
+            out.append(f'<lb n="{i}"' + (' break="no"' if brk else "") + f'/>{escape(t.rstrip() if spaced else t)}')
+            state["open"] = not ends_word(t)
     if not multi:
         out.append('<div type="kāṇḍa" n="1" id="Devādhidevakāṇḍa">')
         for pid, src, boxes in pages:
@@ -191,7 +288,7 @@ def tei(ms_id, pages, reading=None):
             if not lines:
                 continue
             out.append(_pb(pid, src))
-            out.extend(f'<lb n="{i}" break="no"/>{escape(t)}' for i, t in enumerate(lines, 1))
+            lbs(lines)
         out.append("</div>")
     else:
         out.append('<div type="base-text">')
@@ -199,8 +296,9 @@ def tei(ms_id, pages, reading=None):
             lines = boxes.get("main", [])
             if lines:
                 out.append(_pb(pid, src))
-                out.extend(f'<lb n="{i}" break="no"/>{escape(t)}' for i, t in enumerate(lines, 1))
+                lbs(lines)
         out += ["</div>", '<div type="commentary">']
+        state["open"] = False
         for pid, src, boxes in pages:
             comm = {b: boxes[b] for b in ("top", "right", "left", "bottom") if boxes.get(b)}
             if not comm:
@@ -208,19 +306,25 @@ def tei(ms_id, pages, reading=None):
             out.append(_pb(pid, src))
             for b, lines in comm.items():
                 out.append(f'<cb n="{b}"/>')
-                out.extend(f'<lb n="{i}" break="no"/>{escape(t)}' for i, t in enumerate(lines, 1))
+                lbs(lines)
         out.append("</div>")
     out += ["</body>", "</text>", "</TEI>"]
     return "\n".join(out) + "\n"
 
 
-def export(ms_id, from_composite=None):
+def export(ms_id, from_composite=None, spaces=False):
+    """spaces: put word spaces in (or, from a composite, take its spaces as they stand) and write the line breaks
+    they give"""
     d = ms_dir(ms_id)
     if from_composite:
-        pages = parse_composite(open(from_composite, encoding="utf-8").read())
-        print(f"[export] {ms_id}: {len(pages)} pages read from {from_composite}")
+        pages = parse_composite(open(from_composite, encoding="utf-8").read(), keep_end=spaces)
+        print(f"[export] {ms_id}: {len(pages)} pages read from {from_composite}" + (" (spaced as it stands)" if spaces else ""))
     else:
         pages = gather(ms_id)
+        if spaces:
+            space, pack = word_spacer()
+            pages, n = space_pages(pages, space)
+            print(f"[export] {ms_id}: word spaces from {pack}'s spacer: blocks " + ", ".join(f"{k} {v}" for k, v in n.items()))
         txt = d / f"{ms_id}.txt"
         txt.write_text(composite(pages), encoding="utf-8")
         by_src = {s: sum(1 for _, src, _ in pages if src == s) for s in ("corrected", "to_correct", "drafts", None)}
@@ -231,13 +335,13 @@ def export(ms_id, from_composite=None):
               f"{by_src['drafts']} from drafts; {by_src[None]} without text: "
               + ", ".join(pid for pid, src, _ in pages if src is None))
     xml = d / f"{ms_id}.xml"
-    xml.write_text(tei(ms_id, pages), encoding="utf-8")
+    xml.write_text(tei(ms_id, pages, spaced=spaces), encoding="utf-8")
     n_lines = sum(len(t) for _, _, b in pages for t in b.values())
     print(f"  TEI: {xml}  ({sum(1 for _, _, b in pages if b)} pages, {n_lines} lines)")
     return pages
 
 
-def machine(ms_id, model, out=None):
+def machine(ms_id, model, out=None, spaces=False):
     """Read every page of the manuscript afresh with `model`; write the reading alone as a TEI file."""
     from rapidfuzz.distance import Levenshtein
     from .predict import model_label, read_page
@@ -268,9 +372,14 @@ def machine(ms_id, model, out=None):
             warned.append(stem)
         if k % 25 == 0 or k == len(images):
             print(f"  {k}/{len(images)} pages, {(time.time() - t) / 60:.1f} min", file=sys.stderr)
+    written = pages
+    if spaces:                            # the score below stays on the reading itself
+        space, pack = word_spacer()
+        written, n = space_pages(pages, space)
+        print(f"  word spaces from {pack}'s spacer: blocks " + ", ".join(f"{k} {v}" for k, v in n.items()))
     out = Path(out) if out else d / f"{ms_id}.machine.xml"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(tei(ms_id, pages, reading=label), encoding="utf-8")
+    out.write_text(tei(ms_id, written, reading=label, spaced=spaces), encoding="utf-8")
     n_lines = sum(len(t) for _, _, b in pages for t in b.values())
     print(f"  TEI: {out}  ({sum(1 for _, s, _ in pages if s)} pages, {n_lines} lines; "
           f"{len(warned)} pages with a row-finder warning; without rows: {', '.join(pid for pid, s, _ in pages if not s) or 'none'})")
@@ -296,8 +405,10 @@ if __name__ == "__main__":
     ap.add_argument("--from", dest="from_composite", help="composite .txt to build the TEI from")
     ap.add_argument("--model", help="read every page afresh with this model and write the reading alone")
     ap.add_argument("--out", help="with --model: where to write the TEI (default data/<ms>/<ms>.machine.xml)")
+    ap.add_argument("--spaces", action="store_true", help="word spaces put in by the newest pack's spacer, as Manuscribe "
+                    "puts them in, and the line breaks they give (with --from: the composite's spaces as they stand)")
     a = ap.parse_args()
     if a.model:
-        machine(a.ms_id, a.model, a.out)
+        machine(a.ms_id, a.model, a.out, spaces=a.spaces)
     else:
-        export(a.ms_id, a.from_composite)
+        export(a.ms_id, a.from_composite, spaces=a.spaces)

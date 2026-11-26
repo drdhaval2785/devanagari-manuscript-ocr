@@ -17,10 +17,11 @@ BOXES = ("main", "top", "right", "left", "bottom")
 _MARK = re.compile(r"\s*;box\{(\w+)\}\s*")
 
 
-def parse(text):
+def parse(text, keep_end=False):
     """-> {box: [lines]}; a text without markers is the main block. Every line counts, an empty one
     too (a manuscript line the model read as nothing, an ornament), so that line k of a block
-    always goes with image k; only the file's final newline is not a line."""
+    always goes with image k; only the file's final newline is not a line. Whitespace at a line's end is taken
+    off, or with keep_end made one space (a spaced text: the line ends a word, export.py)."""
     boxes, cur = {}, "main"
     for raw in text.splitlines():
         m = _MARK.fullmatch(raw)
@@ -28,7 +29,7 @@ def parse(text):
             cur = m.group(1)
             boxes.setdefault(cur, [])
         else:
-            boxes.setdefault(cur, []).append(raw.rstrip())
+            boxes.setdefault(cur, []).append(re.sub(r"\s+$", " ", raw) if keep_end else raw.rstrip())
     return {b: boxes[b] for b in BOXES if b in boxes} | {b: v for b, v in boxes.items() if b not in BOXES}
 
 

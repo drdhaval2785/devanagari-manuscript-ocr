@@ -28,10 +28,11 @@ makes are published separately under CC BY-SA 4.0.
 
 ```
 /opt/homebrew/bin/python3.11 -m venv .venv
-.venv/bin/pip install "kraken==7.2" lxml rapidfuzz pypdf
+.venv/bin/pip install "kraken==7.2" lxml rapidfuzz pypdf "onnxruntime==1.32.0"
 ```
 
-(`pypdf` only lets `msocr.pagediff` check a PDF's page count against its page images; without it the check is skipped.)
+(`pypdf` only lets `msocr.pagediff` check a PDF's page count against its page images; without it the check is skipped.
+`onnxruntime` runs a model pack's word spacer for `msocr.export --spaces`; the same version as `.venv-onnx`'s.)
 
 Segmentation always uses `data/kraken_models/blla_kraken7.1.1.mlmodel` (`KRAKEN_SEG_MODEL` in `msocr/config.py`): the
 baseline model bundled with kraken 7.1.1, which segmented every manuscript so far. It is not part of this repository;
@@ -433,8 +434,9 @@ left out are listed with their reasons in `data/tseg/flagged_pages.tsv`.
 |---|---|
 | `.venv/bin/python -m msocr.predict LDII_19634 --start 1 --pages 400 --model data/LDII_19634/models/ft3/best.pt` | Reads every page (pages already segmented are not segmented again) |
 | `.venv/bin/python -m msocr.export LDII_19634` | Writes `data/LDII_19634/LDII_19634.txt` (page markers `;p{0001_2}`, one line per manuscript line; corrected pages where they exist, otherwise the model's reading) and `data/LDII_19634/LDII_19634.xml` (the same in the TEI layout of `LDII_85885.xml`) |
-| `.venv/bin/python -m msocr.export LDII_19634 --from data/LDII_19634/LDII_19634.txt` | Rebuilds the TEI file from a composite text file corrected by hand |
-| `.venv/bin/python -m msocr.export LDII_19634 --model data/LDII_19634/models/ft3/best.pt --out <file>` | Reads every page afresh with that model and writes the reading alone, nothing corrected, as a TEI file (default `data/LDII_19634/LDII_19634.machine.xml`): same `<pb>` and `<lb>` layout, the model named in the header. About 3 minutes for 360 pages; touches nothing else |
+| `.venv/bin/python -m msocr.export AKGM_0025383 --spaces` | The same with word spaces, as Manuscribe puts them in when it reads a side: each block of a page spaced as one text by the newest pack's word spacer (`data/model_pack/<pack>/spacer.onnx` at its threshold, through `sanskrit_spacer/spacer_reference.py`), the spaces given back to the lines as Manuscribe's `splitSpaced` does (`export.split_spaced`, identical on 3,009 cases). A line that ends in a space or a daṇḍa ends its word and the next opens with `<lb n=".."/>`; one that does not runs on, and the next opens with `<lb n=".." break="no"/>`. In the `.txt` a line that ends a word keeps one space at its end. A block already spaced by hand keeps its spaces; `corrected/`, `to_correct/` and `drafts/` are not changed. About 0.1 s a page |
+| `.venv/bin/python -m msocr.export LDII_19634 --from data/LDII_19634/LDII_19634.txt` | Rebuilds the TEI file from a composite text file corrected by hand (with `--spaces`, a spaced one: its spaces stand, and a line ending in a space ends its word) |
+| `.venv/bin/python -m msocr.export LDII_19634 --model data/LDII_19634/models/ft3/best.pt --out <file>` | Reads every page afresh with that model and writes the reading alone, nothing corrected, as a TEI file (default `data/LDII_19634/LDII_19634.machine.xml`): same `<pb>` and `<lb>` layout, the model named in the header. About 3 minutes for 360 pages; touches nothing else. `--spaces` puts word spaces in as above (its score against the corrected pages stays on the reading itself) |
 
 To follow how training changes the reading, make that file for each model in turn and keep it
 under version control in a repository of its own (the manuscripts are not for distribution, so a
