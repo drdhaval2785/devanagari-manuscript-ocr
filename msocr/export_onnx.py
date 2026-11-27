@@ -32,7 +32,13 @@ from .params import P, VERSION as PIPELINE_VERSION
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPACER = os.path.abspath(os.path.join(ROOT, "..", "sanskrit_spacer"))
-LICENCE = "CC BY-SA 4.0"
+# The weights' licences (the user's decision, 2026-11-27). The segmenter, the recogniser and the language model may
+# learn from texts under CC BY-NC 4.0 (Muktabodha's diplomatic e-texts), so they are CC BY-NC-SA 4.0; the word spacer
+# learns from CC BY-SA texts (Sanskrit Wikisource, SARIT), whose share-alike admits no other licence, so it stays
+# CC BY-SA 4.0. Packs made before that date are CC BY-SA 4.0 throughout.
+LICENCES = {"segmenter": "CC BY-NC-SA 4.0", "recogniser": "CC BY-NC-SA 4.0", "lm": "CC BY-NC-SA 4.0", "spacer": "CC BY-SA 4.0"}
+LICENCE_NOTE = ("segmenter, recogniser and language model CC BY-NC-SA 4.0 (they may learn from CC BY-NC texts); "
+                "word spacer CC BY-SA 4.0 (it learns from CC BY-SA texts)")
 
 
 def sha256(path):
@@ -145,7 +151,7 @@ def main():
         comps = []
         for c in spec["components"]:
             shutil.copy(lm_dir / c["file"], out / c["file"])
-            comps.append(dict(c, sha256=sha256(out / c["file"]), bytes=os.path.getsize(out / c["file"]), licence=LICENCE))
+            comps.append(dict(c, sha256=sha256(out / c["file"]), bytes=os.path.getsize(out / c["file"]), licence=LICENCES["lm"]))
         lm = {"source": os.path.relpath(lm_dir, ROOT), "built": spec["built"], "order": spec["order"], "components": comps, "decoding": spec["decoding"],
               "meaning": "character n-grams over the letters of the Devanagari block (daṇḍas, digits and marks one boundary symbol), mixed by weight; lines are read by a prefix beam search over the recogniser's probabilities with pipeline.json's lm parameters (msocr/lm.py, Manuscribe's recoglm.js)"}
         parts = ", ".join("{} {:.1f} MB".format(c["name"], c["bytes"] / 1e6) for c in comps)
@@ -154,10 +160,10 @@ def main():
         print("  language model: none (lines will be read greedily)")
     shutil.copy(os.path.join(ROOT, "msocr", "pipeline.json"), out / "pipeline.json")
     shutil.copy(os.path.join(SPACER, "spacer.json"), out / "spacer.json")
-    for m in models.values():
+    for k, m in models.items():
         m["sha256"] = sha256(out / m["file"])
         m["bytes"] = os.path.getsize(out / m["file"])
-        m["licence"] = LICENCE
+        m["licence"] = LICENCES[k]
     manifest = {
         "pack": name, "created": datetime.datetime.now().isoformat(timespec="seconds"),
         "pipeline_version": PIPELINE_VERSION, "spacer_version": spacer_spec["version"],
@@ -165,7 +171,7 @@ def main():
         "models": models,
         "lm": lm,
         "files": {f: sha256(out / f) for f in ("pipeline.json", "spacer.json", "recogniser_chars.json")},
-        "licence": f"weights {LICENCE}; training data: the developer's own manuscripts and, for the spacer, CC BY-SA/CC0 texts (Pramāṇa)",
+        "licence": f"weights: {LICENCE_NOTE}; training data: the developer's own manuscripts, manuscripts transcribed by Muktabodha (CC BY-NC 4.0) and, for the spacer, CC BY-SA/CC0 texts (Pramāṇa)",
     }
     json.dump(manifest, open(out / "manifest.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     for k, m in models.items():

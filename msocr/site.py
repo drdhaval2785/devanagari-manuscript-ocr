@@ -35,7 +35,7 @@ from .config import DATA, MANUSCRIPTS
 ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT.parent / "manuscribe-models"
 MANUSCRIBE = Path(os.environ.get("MANUSCRIBE", "/Users/Shared/drdhaval2785/edit_manuscripts/manuscript_editor"))
-LICENCE = "CC BY-SA 4.0"
+LICENCE = "CC BY-SA 4.0"      # the licence of packs made before 2026-11-27, which state none per model
 VARIANTS = {"webgpu": ("ort.webgpu.bundle.min.mjs", "ort-wasm-simd-threaded.asyncify.wasm"),
             "wasm": ("ort.wasm.bundle.min.mjs", "ort-wasm-simd-threaded.wasm")}
 
@@ -87,6 +87,24 @@ def _recogniser_lineage(source):
     return out
 
 
+def _muktabodha(lineage):
+    """The Muktabodha manuscripts a recogniser learned from (any run of its lineage): [{manuscript, etext, title}], from
+    their configs in data/muktabodha/."""
+    from .config import DATA
+    out, seen = [], set()
+    for step in lineage:
+        for ms in step.get("sources", []):
+            f = DATA / "muktabodha" / f"{ms}.json"
+            if ms in seen or not f.exists():
+                continue
+            seen.add(ms)
+            cfg = json.loads(f.read_text(encoding="utf-8"))
+            et = Path(cfg["etext"]).name
+            cat = re.search(r"M\d{4,5}", et)
+            out.append({"manuscript": ms, "etext": cat.group(0) if cat else et, "title": et.split("-M")[0]})
+    return out
+
+
 def _segmenter_pages():
     """The segmenter's training pages as the split stands now (tseg.page_list), by manuscript, and the heights of
     the training images (the scale Manuscribe should render a side at)."""
@@ -128,12 +146,17 @@ def _cards(manifest):
     sp = {"texts": "Pramāṇa's open release: Sanskrit Wikisource (CC BY-SA), SARIT (CC BY-SA), Ambuda (CC0)",
           "run": Path(manifest["models"]["spacer"]["source"]).parent.name}
     for k, c in (("segmenter", seg), ("recogniser", rec), ("spacer", sp)):
-        c["licence"] = LICENCE
+        c["licence"] = manifest["models"][k].get("licence", LICENCE)
         c["consent"] = ("the developer's own manuscripts only; no contributed data" if k != "spacer"
                         else "openly licensed texts; no manuscript images")
     if seg.get("contributions"):
         seg["consent"] = (f"the developer's own manuscripts, and folio sides contributed from Manuscribe with their editors' consent: "
                           f"{sum(c['sides'] for c in seg['contributions'])} sides of {len({c['manuscript'] for c in seg['contributions']})} manuscript(s)")
+    mukta = _muktabodha(rec["lineage"])
+    if mukta:
+        rec["muktabodha"] = mukta
+        rec["consent"] = (f"the developer's own manuscripts, and {len(mukta)} manuscripts transcribed by Muktabodha Indological "
+                          f"Research Institute (diplomatic e-texts, CC BY-NC 4.0) whose scans eGangotri published on archive.org")
     if rec["contributions"]:
         ms = sorted({c["manuscript"] for c in rec["contributions"]})
         rel = sorted({c.get("release") or "-" for c in rec["contributions"]})
@@ -142,13 +165,26 @@ def _cards(manifest):
     return {"segmenter": seg, "recogniser": rec, "spacer": sp}
 
 
+def _licences(m):
+    """The licences of a pack's weights, from its manifest: one, or each model's."""
+    lic = {k: mod.get("licence", LICENCE) for k, mod in m["models"].items()}
+    if m.get("lm"):
+        lic["language model"] = next((c.get("licence") for c in m["lm"].get("components", []) if c.get("licence")), LICENCE)
+    if len(set(lic.values())) == 1:
+        return next(iter(lic.values()))
+    by = {}
+    for k, v in lic.items():
+        by.setdefault(v, []).append(k)
+    return "; ".join(f"{', '.join(ks)} {v}" for v, ks in by.items())
+
+
 def _card_md(m):
     c = {k: m["models"][k]["card"] for k in ("segmenter", "recogniser", "spacer")}
     seg, rec, sp = c["segmenter"], c["recogniser"], c["spacer"]
     lines = [f"# {m['pack']}", "",
              f"A recognition pack for Manuscribe: the line segmenter, the line recogniser and the word spacer, with the "
              f"parameters of the stages between them (pipeline version {m['pipeline_version']}, spacer version "
-             f"{m['spacer_version']}). Weights under {LICENCE}. Made with {NAME} "
+             f"{m['spacer_version']}). Weights: {_licences(m)}. Made with {NAME} "
              f"{m.get('software', {}).get(NAME, '')} ({REPOSITORY}).", "",
              "## Segmenter", "", f"Run `{seg['run']}`. {seg['log']}", "",
              f"Trained on pages of these manuscripts (pages each, {sum(seg['manuscripts'].values())} in all, as the training "
@@ -163,6 +199,12 @@ def _card_md(m):
               if s.get("sources") else s["manuscript"])
         lines.append(f"- `{s['run']}` on {on}" + (f", {s['lines']} lines" if s.get("lines") else "")
                      + (", cut from the U-Net's segmentation as Manuscribe cuts them" if s.get("lines_from") == "seg_torch" else ""))
+    if rec.get("muktabodha"):
+        lines += ["", "The transcriptions of " + ", ".join(f"{x['manuscript']} ({x['title']}, e-text {x['etext']})" for x in rec["muktabodha"])
+                  + " are Muktabodha Indological Research Institute's diplomatic e-texts (muktabodha.org, CC BY-NC 4.0), typed from "
+                  "eGangotri's scans of manuscripts of the Shri Raghunath Temple MSS Library, Jammu (RTJ) and the Uttar Pradesh "
+                  "Sanskrit Sansthan, Lucknow (UPSS); their lines were paired with the scans' rows by devanagari-manuscript-ocr's "
+                  "msocr/muktabodha.py. That is why this recogniser and the language model are under CC BY-NC-SA 4.0."]
     pooled = rec["lineage"] and rec["lineage"][0].get("sources")
     lines += ["", ("It reads the hands it learned from best; a hand it has never seen reads worse, the more so the further "
                    "that hand is from these. Pooling over more hands is what makes it read new ones better."
@@ -181,9 +223,11 @@ def _card_md(m):
                     else "the manuscripts' own transcriptions (" + ", ".join(f"{s['manuscript']} {s['lines']}" for s in c.get("sources", [])) + " lines)")
             lines.append(f"- `{c['name']}` (weight {c['weight']}): {c['letters']:,} letters of {what}; {c['entries']:,} n-grams"
                          + (f", those seen under {c['pruned_below']} times left out" if c.get("pruned_below", 1) > 1 else "") + f"; {c['bytes'] / 1e6:.1f} MB.")
-        lines += ["", "Measured on lines never trained on (2026-11-26, the pooled recogniser pool2 on the last page of each of "
-                  "its ten manuscripts): a quarter fewer character errors (3.79 % to 2.85 %) and three tenths fewer akṣara "
-                  "errors (6.18 % to 4.28 %) than reading letter by letter; daṇḍas and digits are not its business.", ""]
+        lines += ["", "Measured on lines never trained on: 2026-11-26, the pooled recogniser pool2 on the last page of each of "
+                  "its ten manuscripts, a quarter fewer character errors (3.79 % to 2.85 %) and three tenths fewer akṣara "
+                  "errors (6.18 % to 4.28 %) than reading letter by letter; 2026-11-27, pool3b on held-out test pages, "
+                  "LDII_85885 2.77 % to 2.31 %, RTJ_4387 3.41 % to 2.58 %, RTJ_4914 4.81 % to 3.21 %, RTJ_1127 2.40 % to "
+                  "1.78 % of characters wrong. Daṇḍas and digits are not its business.", ""]
     else:
         lines += ["## Language model", "", "None in this pack: lines are read letter by letter, as the recogniser sees them.", ""]
     lines += ["## Consent", ""]
@@ -279,7 +323,7 @@ def write_index(site):
                       "pipeline_version": m["pipeline_version"], "spacer_version": m["spacer_version"],
                       "needs": m.get("needs", {}), "bytes": sum(files),
                       "models": {k: Path(mod["source"]).parent.name for k, mod in m["models"].items()},
-                      "licence": LICENCE})
+                      "licence": _licences(m)})
     runtimes = {}
     for rf in sorted((site / "runtime").glob("*/runtime.json")):
         r = json.loads(rf.read_text(encoding="utf-8"))
@@ -320,17 +364,26 @@ The packs are made by [devanagari-manuscript-ocr](@REPOSITORY@) (`python -m msoc
 `python -m msocr.site`); its reference pipeline in Python and Manuscribe's JavaScript are held to give the same output
 by stage fixtures. Made with devanagari-manuscript-ocr @VERSION@, for Manuscribe @VERSION@.
 
-Licences: the models' weights are under CC BY-SA 4.0 (see LICENSE.md); ONNX Runtime Web under MIT
-(runtime/*/LICENSE).
+Licences: the models' weights as LICENSE.md and each pack's manifest say (from 27 November 2026 the segmenter, the
+recogniser and the language model CC BY-NC-SA 4.0, the word spacer CC BY-SA 4.0; earlier packs CC BY-SA 4.0 throughout);
+ONNX Runtime Web under MIT (runtime/*/LICENSE).
 """
 
 LICENSE_MD = """# Licences
 
-The models' weights in `packs/` (the segmenter, the recogniser and the word spacer, and the parameter files beside
-them) are licensed under the Creative Commons Attribution-ShareAlike 4.0 International licence (CC BY-SA 4.0):
-https://creativecommons.org/licenses/by-sa/4.0/. Each pack's `MODEL_CARD.md` says what each model learned from; the
-word spacer learned from openly licensed texts (Sanskrit Wikisource and SARIT, CC BY-SA; Ambuda, CC0) through
-Pramāṇa's open release.
+The models' weights in `packs/` (the segmenter, the recogniser, the language model and the word spacer, and the
+parameter files beside them) are licensed per model; each pack's `manifest.json` gives the licence of each, and its
+`MODEL_CARD.md` says what each learned from.
+
+- Packs made from 27 November 2026 on: the segmenter, the recogniser and the language model under the Creative Commons
+  Attribution-NonCommercial-ShareAlike 4.0 International licence (CC BY-NC-SA 4.0,
+  https://creativecommons.org/licenses/by-nc-sa/4.0/), because they may learn from manuscripts whose transcriptions
+  are under CC BY-NC 4.0 (Muktabodha Indological Research Institute's diplomatic e-texts); the word spacer under the
+  Creative Commons Attribution-ShareAlike 4.0 International licence (CC BY-SA 4.0,
+  https://creativecommons.org/licenses/by-sa/4.0/), because it learns from Sanskrit Wikisource and SARIT (CC BY-SA)
+  and Ambuda (CC0) through Pramāṇa's open release.
+- Packs made before that date (pack-20261124-p1-s1, pack-20261124b-p1-s1, pack-20261126-p2-s1): every model under
+  CC BY-SA 4.0, as they were published.
 
 ONNX Runtime Web, in `runtime/`, is Microsoft's, under the MIT licence: see the LICENSE file beside it.
 """

@@ -67,8 +67,10 @@ ROOT = DATA / "contributions"
 REGISTER = ROOT / "register.tsv"
 FIELDS = ["id", "manuscript", "script", "lines", "sides", "wording", "consent_date", "added", "state", "note", "issue", "contributor",
           "release", "quality", "usable", "usable_sides"]
-APPROVED = {"1", "2"}   # consent wordings approved by the maintainer (Manuscribe's recogview.js, CONSENT.version)
-SIDES = {"2"}           # ... of which those that give whole folio sides, not lines only
+APPROVED = {"3"}        # consent wordings approved by the maintainer (Manuscribe's recogview.js, CONSENT.version); 1 and 2
+                        # named CC BY-SA 4.0 for the models, which since 2026-11-27 are CC BY-NC-SA 4.0: no package was
+                        # given on them, and none is taken
+SIDES = {"3"}           # ... of which those that give whole folio sides, not lines only
 TAG = __import__("re").compile(r"^[a-z]{2,3}-[A-Z][a-z]{3}$")       # a manuscript's language and script, as sa-Deva
 MODELS_SCRIPT = "sa-Deva"   # the language and script of the models trained here: only their data trains them
 INBOX = "drdhaval2785/manuscribe-contributions"
