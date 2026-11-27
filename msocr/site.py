@@ -89,19 +89,23 @@ def _recogniser_lineage(source):
 
 def _muktabodha(lineage):
     """The Muktabodha manuscripts a recogniser learned from (any run of its lineage): [{manuscript, etext, title}], from
-    their configs in data/muktabodha/."""
+    their configs in data/muktabodha/ and, for those taken from the MIDF dataset, data/midf/ (which also names the
+    dataset's id: "midf")."""
     from .config import DATA
     out, seen = [], set()
     for step in lineage:
         for ms in step.get("sources", []):
-            f = DATA / "muktabodha" / f"{ms}.json"
-            if ms in seen or not f.exists():
+            f, g = DATA / "muktabodha" / f"{ms}.json", DATA / "midf" / f"{ms}.json"
+            if ms in seen or not (f.exists() or g.exists()):
                 continue
             seen.add(ms)
-            cfg = json.loads(f.read_text(encoding="utf-8"))
-            et = Path(cfg["etext"]).name
-            cat = re.search(r"M\d{4,5}", et)
-            out.append({"manuscript": ms, "etext": cat.group(0) if cat else et, "title": et.split("-M")[0]})
+            if f.exists():
+                et = Path(json.loads(f.read_text(encoding="utf-8"))["etext"]).name
+                cat = re.search(r"M\d{4,5}", et)
+                out.append({"manuscript": ms, "etext": cat.group(0) if cat else et, "title": et.split("-M")[0]})
+            else:
+                cfg = json.loads(g.read_text(encoding="utf-8"))
+                out.append({"manuscript": ms, "etext": cfg["midf"], "title": cfg["title"], "midf": cfg["midf"]})
     return out
 
 
@@ -204,7 +208,12 @@ def _card_md(m):
                   + " are Muktabodha Indological Research Institute's diplomatic e-texts (muktabodha.org, CC BY-NC 4.0), typed from "
                   "eGangotri's scans of manuscripts of the Shri Raghunath Temple MSS Library, Jammu (RTJ) and the Uttar Pradesh "
                   "Sanskrit Sansthan, Lucknow (UPSS); their lines were paired with the scans' rows by devanagari-manuscript-ocr's "
-                  "msocr/muktabodha.py. That is why this recogniser and the language model are under CC BY-NC-SA 4.0."]
+                  "msocr/muktabodha.py"
+                  + ("" if not any(x.get("midf") for x in rec["muktabodha"]) else
+                     " (for " + ", ".join(x["manuscript"] for x in rec["muktabodha"] if x.get("midf")) + " the pages and lines were "
+                     "matched to the text by the MIDF/eGangotri dataset, huggingface.co/datasets/tadad/midf-egangotri-sanskrit, "
+                     "and brought in by msocr/midf.py)")
+                  + ". That is why this recogniser and the language model are under CC BY-NC-SA 4.0."]
     pooled = rec["lineage"] and rec["lineage"][0].get("sources")
     lines += ["", ("It reads the hands it learned from best; a hand it has never seen reads worse, the more so the further "
                    "that hand is from these. Pooling over more hands is what makes it read new ones better."

@@ -199,7 +199,35 @@ transcriber's.
 .venv/bin/python -m msocr.segment RTJ_4387
 .venv/bin/python -m msocr.align RTJ_4387 --seg=seg_torch
 .venv/bin/python -m msocr.muktabodha RTJ_4387 --check
+PYTHONPATH=. .venv/bin/python tools/muktabodha_prepare.py --model data/pool/models/pool3b/best.pt RTJ_4387
 ```
+
+The last step (since 2026-11-27) makes the lines the pool trains on. It pairs rows and e-text lines one by one by what
+the recogniser reads in them (`msocr/linepair.py`), so that a missed row or a gloss cut as a row costs that line and
+not its whole page; every page keeps the set it was in. `align` and `--check` remain the quick test that the pages are
+paired with the right sides.
+
+### From the MIDF/eGangotri dataset (2026-11-27)
+
+The dataset [tadad/midf-egangotri-sanskrit](https://huggingface.co/datasets/tadad/midf-egangotri-sanskrit) has
+already matched many of these e-texts to their scans, page by page and line by line (its "segmentation v1.1": 24
+manuscripts, 2,879 pages, 31,215 lines; the lines' positions reviewed, the text not checked character by character).
+`msocr/midf.py` takes its page images and text, but finds the rows with our U-Net and row finder and cuts them with
+our cutter, so that these lines are cut like every other manuscript's; the dataset's line positions only say which of
+our rows is which line, drop the rows that are none (a library stamp), and decide whether a photo may be cut to the
+leaf. Lines are paired one by one: one that has no clean row (none, writing apart cut with it, a part of it left
+outside, a reading closer to another line) is left out, and the rest of its page kept, unless fewer than half pair.
+The pages are then split and cut. One command does all of it, in place of the steps above
+(do not run `align` on such a manuscript); an e-text already imported through `muktabodha.py` is refused, so that a
+page cannot be in one manuscript's training set and another's test set.
+
+```
+.venv/bin/python -m msocr.midf RTJ_5753 --midf M00639 --into tripurasundarisahasranama/mula   # --no-cut: report only
+.venv/bin/python -m msocr.midf RTJ_5753                                                        # again, from data/midf/
+```
+
+Read `data/<ms>/midf.txt` afterwards: the pages and lines left out and why (pictures in `preview_seg_torch/`), and the lines
+read worst. A manuscript with cut lines joins the next pool training by itself.
 
 ## Training on all hands at once
 
