@@ -12,7 +12,8 @@ Input
   an image name as 009851_00066_1.
 - --gt: the ground truth of each page, in the format of corrected/ (msocr/pagetext.py: one line per manuscript line, a
   ;box{...} marker before each block of a tripāṭha or pañcapāṭha page); given once per page, in the order of the pages.
-  Default data/<ms>/corrected/<page>.txt.
+  Default data/<ms>/corrected/<page>.txt, else the page's lines of the manuscript's transcription (gt_lines.jsonl: a
+  Muktabodha manuscript, say), written to data/<ms>/truth/<page>.txt.
 - --seg: the segmentation to cut the rows from (default config.SEG, seg_torch: the U-Net's; seg: Kraken's). A page not
   yet segmented so is segmented first.
 - --widen: each row cut this fraction of a line pitch further at both ends than predict cuts it (0.25: a quarter pitch,
@@ -822,6 +823,26 @@ for (const sec of $('.pg-sec')) {
 # ------------------------------------------------------------------ command line
 
 
+def truth_file(ms, img):
+    """The page's ground truth: its corrected page (data/<ms>/corrected/), else, for a manuscript with a transcription
+    (gt.extract's gt_lines.jsonl: a TEI of the editor's, or a Muktabodha e-text made into one), the page's lines from
+    it, written once to data/<ms>/truth/<page>.txt in the corrected/ format."""
+    corrected = ms_dir(ms) / "corrected" / f"{img[:-4]}.txt"
+    if corrected.is_file():
+        return corrected
+    gl = ms_dir(ms) / "gt_lines.jsonl"
+    if not gl.is_file():
+        return corrected
+    import json
+    lines = [r["text_spaced"] for r in map(json.loads, gl.read_text(encoding="utf-8").splitlines()) if r["image"] == img]
+    if not lines:
+        return corrected
+    out = ms_dir(ms) / "truth" / f"{img[:-4]}.txt"
+    out.parent.mkdir(exist_ok=True)
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
 def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False, lm=None, widen=0.0):
     """compare: further readings shown greyed under the model's and scored alongside, each 'greedy' (the model itself
     without the language model: the model's effect on every akṣara is then marked), a recogniser (read greedily), or
@@ -839,7 +860,7 @@ def run(pdf, pages, model, gt=None, seg=None, compare=None, out=None, show=False
     chosen = [resolve_page(ms, p, images) for p in pages]
     if gt and len(gt) != len(chosen):
         raise SystemExit(f"--gt given {len(gt)} times for {len(chosen)} pages: give it once per page, or not at all")
-    gts = [Path(g) for g in gt] if gt else [ms_dir(ms) / "corrected" / f"{img[:-4]}.txt" for img, _ in chosen]
+    gts = [Path(g) for g in gt] if gt else [truth_file(ms, img) for img, _ in chosen]
     for g in gts:
         if not g.is_file():
             raise SystemExit(f"no ground truth: {g} does not exist (--gt names the file)")

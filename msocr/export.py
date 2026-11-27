@@ -60,7 +60,9 @@ TITLES = {"LDII_19634": "हेमाभिधानचिंतामणिन�
           "AKGM_0025383": "हेमाभिधानचिंतामणिनाममालादीपिका - तात्पर्यार्थप्रकाशिका (चारित्रसिंही)"}
 # the library a manuscript comes from, by the prefix of its id
 COLLECTIONS = {"LDII": "Lālabhāī Dalapatabhāī Institute of Indology, Ahmedabad",
-               "AKGM": "Ācārya Śrī Kailāsasāgarasūri Jñānamandira, Śrī Mahāvīra Jaina Ārādhanā Kendra, Kobā"}
+               "AKGM": "Ācārya Śrī Kailāsasāgarasūri Jñānamandira, Śrī Mahāvīra Jaina Ārādhanā Kendra, Kobā",
+               "RTJ": "Shri Raghunath Temple MSS Library, Jammu",
+               "UPSS": "Uttar Pradesh Sanskrit Sansthan, Lucknow"}
 
 
 def page_id(stem):

@@ -642,7 +642,9 @@ def pool_sources(ms_ids=None, holdout=1, exclude=(), contributions=True, seg="se
         ms = d.name
         if not d.is_dir() or (ms_ids and ms not in ms_ids and ms not in exclude):
             continue
-        if list((d / "lines" / "train").glob("*.png")):
+        if list((d / "lines" / "train").glob("*.png")) or (seg != "seg" and list((lines_dir(ms, seg) / "train").glob("*.png"))):
+            # (a manuscript aligned from its transcription on our segmentation only, as the Muktabodha ones, has no
+            # Kraken-cut lines)
             if not list((lines_dir(ms, seg) / "train").glob("*.png")):     # lines of one cut only: no mixing of the two
                 print(f"  ! {ms}: no lines from {seg} (python -m msocr.align {ms} --seg={seg}); left out")
                 continue

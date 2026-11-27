@@ -17,6 +17,7 @@ segmentations and trained weights in another. The manuscript images themselves s
 | `<ms>/lines/`, `<ms>/drafts/`, `<ms>/to_correct/`, `<ms>/review/` | line images, machine readings, pages waiting for correction | `msocr.predict` |
 | `<ms>/corrected/`, `<ms>/corrected_upto.txt` | corrected page transcriptions (never re-read) | by hand |
 | `<ms>/<ms>.xml` | the manuscript in Manuscribe TEI | `msocr.export` (hand-edited ones are managed with `msocr.update`) |
+| `<ms>/muktabodha.txt`, `<ms>/muktabodha_check.txt` | for a manuscript made from a Muktabodha e-text and its scan: the page table and the e-text's irregularities; every paired page read by the recogniser against the transcription | `msocr.muktabodha` |
 | `<ms>/models/`, `pool/models/`, `tseg/models/` | trained recognisers and segmenters | `msocr.recognizer`, `msocr.tseg` |
 | `<ms>/show/` | pictures of the rows found | `msocr.show` |
 | `kraken_review/` | review pages and their pictures; `feedback/` the verdicts taken in | `msocr.kreview`, `msocr.kfeedback` |

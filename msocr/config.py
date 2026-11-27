@@ -31,16 +31,28 @@ def _image_name(num):
     return lambda pb: "{}_0{}_{}.jpg".format(num, *pb.split("_"))
 
 
+# Manuscripts from other libraries, which come with a transcription (Muktabodha's e-texts, made into TEI and page
+# images by msocr/muktabodha.py): training_data/<text>/<commentary>/manuscripts/<library>_<n>/ beside the corpus, the
+# transcription at training_data/<text>/<commentary>/transcriptions/<id>.xml, registered with it when it is there.
+TRAINING = CORPUS.parent / "training_data"
+LIBRARIES = ("LDII", "AKGM", "RTJ", "UPSS")     # LDII and AKGM as below; RTJ = Shri Raghunath Temple MSS Library, Jammu;
+                                                # UPSS = Uttar Pradesh Sanskrit Sansthan, Lucknow
+
+
 def _discover():
     """Every manuscript folder in the corpus: <text>/<commentary>/manuscripts/LDII_<n>/ (Lālabhāī Dalapatabhāī
-    Institute, Ahmedabad) or AKGM_<n>/ (Kailāsasāgarasūri Jñānamandira, Kobā). Page images are named
-    <6-digit number>_<5-digit folio>_<side>.jpg."""
+    Institute, Ahmedabad) or AKGM_<n>/ (Kailāsasāgarasūri Jñānamandira, Kobā), and in training_data (any library in
+    LIBRARIES, its transcription beside it). Page images are named <6-digit number>_<5-digit folio>_<side>.jpg."""
     found = {}
-    for sub in ("manuscripts", "manuscript"):
-        for d in sorted(p for pat in ("LDII_*", "AKGM_*") for p in CORPUS.glob(f"*/*/{sub}/{pat}")):
-            if d.is_dir():
-                found[d.name] = {"images": d, "image_name": _image_name(f"{int(d.name.split('_')[1]):06d}"),
-                                 "text": d.parts[-4], "commentary": d.parts[-3]}
+    for root in (CORPUS, TRAINING):
+        for sub in ("manuscripts", "manuscript"):
+            for d in sorted(p for lib in LIBRARIES for p in root.glob(f"*/*/{sub}/{lib}_*")):
+                if d.is_dir():
+                    found[d.name] = {"images": d, "image_name": _image_name(f"{int(d.name.split('_')[1]):06d}"),
+                                     "text": d.parts[-4], "commentary": d.parts[-3]}
+                    tei = d.parent.parent / "transcriptions" / f"{d.name}.xml"
+                    if root == TRAINING and tei.exists():
+                        found[d.name]["tei"] = tei
     return found
 
 

@@ -8,7 +8,9 @@ browser it is the reference of. Manuscribe and its companions (this, sanskrit_sp
 manuscribe-contributions) always carry the same version number: use the same version of each.
 
 The code is under the GNU General Public License v3 ([LICENSE](LICENSE)), as Manuscribe's is; the trained weights it
-makes are published separately under CC BY-SA 4.0.
+makes are published separately: since 27 November 2026 the segmenter, the recogniser and the language model under
+CC BY-NC-SA 4.0 (they may learn from Muktabodha's CC BY-NC transcriptions), the word spacer under CC BY-SA 4.0 (it
+learns from CC BY-SA texts); packs made before then are CC BY-SA 4.0 throughout.
 
 ## Current state
 
@@ -164,6 +166,40 @@ in the corpus is registered automatically (`msocr/config.py`); a manuscript with
 by hand. A manuscript that came as one PDF has its page images extracted beside it, named like the others
 (`<6-digit number>_<5-digit folio>_<side>.jpg`, the cover as folio 0): see `AKGM_0025383` in
 `abhidhanachintamani_commentaries/charitrasimha/manuscripts/`.
+
+## A manuscript with a Muktabodha e-text (2026-11-27)
+
+Muktabodha's library (muktabodha.org) publishes diplomatic transcriptions of manuscripts that eGangotri has scanned
+(archive.org): a transcription side by side and line by line, with the glosses in the margins in round brackets, is a
+ready ground truth for a new hand. `msocr/muktabodha.py` makes such a pair into a manuscript like the others, under
+`training_data/` beside the corpus (`<text>/<commentary>/manuscripts/<library>_<n>/` for the page images, named as
+the corpus names them, the covers as folio 0; `<text>/<commentary>/transcriptions/<id>.xml` for the transcription in
+Manuscribe's TEI, which registers it with the pipeline, `msocr/config.py`), from a config in `data/muktabodha/<id>.json`
+(the e-text, the PDF, the folder, and how the PDF is laid out). It reports the page table and every irregularity of the
+e-text (`data/<ms>/muktabodha.txt`). Then the usual route: `gt.extract`, `segment`, `align --seg=seg_torch`; and
+`--check` reads every paired page with the recogniser against the transcription, to catch a side paired with the wrong
+page before any training.
+
+Which PDF page is which side is settled in one of two ways. A clean PDF (one side a page, in the e-text's order, the
+sides the transcriber had not absent from the PDF too) takes the plain plan, `first_text_page` and the page count.
+Any other (`match`: `monotone` keeps the PDF's order and skips blank pages and second photos; `free` finds each page's
+side wherever it is) is read: every page is cut into rows by the U-Net and read by the recogniser, and the reading is
+set against every side of the transcription by edit distance; the right side is the one far closer than any other,
+even on a hand the recogniser reads with half its letters wrong (the eight manuscripts so far: a pair reads 0.2-0.45
+away, a wrong side 0.75-0.9). Before that a photo holding two leaves one above the other is cut apart at the gap
+between their lines (`sides_per_page: 2`), a small leaf on a dark table is cut out of its photo (`crop: paper`),
+and a 600 dpi scan scaled down (`max_width`). A leaf of few, large lines is set in a canvas twice its height in the paper's colour (`pad: 2`): the segmenter sees every page 640 px high, and lines that fill the photo are otherwise far taller than any it learnt (padding took the Bagalāmukhī from 9 aligned pages to 268, the Ūrdhvāmnāya from 31 to 67). The e-text's quirks are taken in their stride: a marker with a prefix
+or a PDF page number, a first side without a marker, sides labelled by photo rather than by folio
+(`sequential_ids`), a folio number typed twice, remarks where a marker would stand, `-` and `.....` of the
+transcriber's.
+
+```
+.venv/bin/python -m msocr.muktabodha RTJ_4387            # from data/muktabodha/RTJ_4387.json; --redo to extract again
+.venv/bin/python -c "from msocr import gt; gt.extract('RTJ_4387')"
+.venv/bin/python -m msocr.segment RTJ_4387
+.venv/bin/python -m msocr.align RTJ_4387 --seg=seg_torch
+.venv/bin/python -m msocr.muktabodha RTJ_4387 --check
+```
 
 ## Training on all hands at once
 
