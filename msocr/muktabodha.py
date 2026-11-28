@@ -83,8 +83,8 @@ from .config import DATA, TRAINING, ms_dir
 
 CONFIGS = DATA / "muktabodha"
 DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
-MARKER = re.compile(r"^(?:\S{1,14}\s+)?पृ०\s*([^)]{0,40})\)\s?")
-MARKER_LIKE = re.compile(r"^(?:\S{1,14}\s+)?पृ०")
+MARKER = re.compile(r"^(?:\S{1,14}\s+)?(?:पृ०|प्\.)\s*([^)]{0,40})\)\s?")     # also the 'प्.' some e-texts use
+MARKER_LIKE = re.compile(r"^(?:\S{1,14}\s+)?(?:पृ०|प्\.)")
 # "FOLIO NO. 42a IS NOT AVAILABLE" typed through the Devanagari keyboard (ण्Oट् आVआईḻआBḻE), or in Hindi
 NOT_AVAILABLE = re.compile(r"उपलब्ध\s*नही|आVआईḻआBḻE|ण्Oट्|NOT\s+AVAILABLE", re.I)
 SIDE = {"अ": 1, "ब": 2, "": 1}
