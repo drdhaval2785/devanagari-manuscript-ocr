@@ -63,6 +63,11 @@ from .config import ms_dir
 
 from .params import P as _P
 HEIGHT = _P["recogniser"]["height"]
+# Where the pool trains: the CPU by default (2026-11-27: on the M2 Pro, one pool pass took 4 min 54 s on the CPU and
+# 6 min 46 s on the GPU, MPS, for this small network: the batches are too small for the GPU to pay off). MSOCR_DEVICE=mps
+# uses the GPU. The CTC loss is always computed on the CPU.
+import os as _os
+DEVICE = torch.device(_os.environ.get("MSOCR_DEVICE") or "cpu")
 STRIDE = _P["recogniser"]["stride"]         # image columns per output column
 PIECES_UNTIL_CER = 30.0     # leave stage 1 once validation CER is under this ...
 PIECES_MAX_PASSES = 25      # ... or after this many passes regardless
@@ -140,11 +145,21 @@ def to_tensor(im):
     return torch.from_numpy(1.0 - np.asarray(im, dtype=np.float32) / 255.0)
 
 
+def _load_one(f):
+    with Image.open(f) as im:
+        x = to_tensor(im)
+    return (x, f.with_suffix(".gt.txt").read_text(encoding="utf-8"), f.stem)
+
+
 def load_split(ms_id, split, limit=None, seg="seg"):
+    """The line images of a split, in file-name order. Read in parallel threads (PNG decoding releases the GIL):
+    single-threaded this took 155 s for the pool's 58,000 lines on the M2 Pro (2026-11-27)."""
+    from concurrent.futures import ThreadPoolExecutor
     files = sorted((lines_dir(ms_id, seg) / split).glob("*.png"))
     if limit:
         files = files[:limit]
-    return [(to_tensor(Image.open(f)), f.with_suffix(".gt.txt").read_text(encoding="utf-8"), f.stem) for f in files]
+    with ThreadPoolExecutor(8) as pool:
+        return list(pool.map(_load_one, files))
 
 
 def make_pieces(lines, rng):
@@ -237,7 +252,7 @@ def evaluate(net, samples, chars, size=16):
     with torch.no_grad():
         for idx in batches(samples, size):
             x, lens = collate(samples, idx)
-            logits = net(x)
+            logits = net(x.to(next(net.parameters()).device)).cpu()
             for k, i in enumerate(idx):
                 pairs.append((decode(logits[k, :lens[k]], chars), samples[i][1], samples[i][2]))
     errors = sum(Levenshtein.distance(p, t) for p, t, _ in pairs)
@@ -672,7 +687,7 @@ def pool_sources(ms_ids=None, holdout=1, exclude=(), contributions=True, seg="se
     return found
 
 
-def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1, ms_ids=None, exclude=(), threads=6, seed=0, lag=8,
+def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1, ms_ids=None, exclude=(), threads=6, seed=0, lag=8, batch=8,
          contributions=True, seg="seg"):
     """Continue a trained model on every manuscript that has training text, all at once.
 
@@ -720,6 +735,7 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
     net, chars, ck = load_model(base)
     chars, added = _extend_alphabet(net, chars, [s[1] for f in sources for s in f[2] + f[3]])
     c2i = {c: i + 1 for i, c in enumerate(chars)}
+    net = net.to(DEVICE)
     opt = torch.optim.AdamW(net.parameters(), lrate, weight_decay=1e-4)
 
     short, k = [], 0
@@ -784,9 +800,9 @@ def pool(run="pool1", base=None, passes=40, lrate=3e-4, per_pass=3000, holdout=1
             samples += rng.sample(tr, q) if len(tr) >= q else rng.choices(tr, k=q)
         net.train()
         tot_loss = tot_chars = 0
-        for idx in batches(samples, 8, rng):
+        for idx in batches(samples, batch, rng):
             x, lens = collate(samples, idx, aug=True)
-            logp = net(x).log_softmax(-1)
+            logp = net(x.to(DEVICE)).log_softmax(-1).cpu()
             tg = torch.tensor([c2i[c] for i in idx for c in samples[i][1]])
             tl = torch.tensor([len(samples[i][1]) for i in idx])
             loss = nn.functional.ctc_loss(logp.permute(1, 0, 2), tg, lens, tl, reduction="sum", zero_infinity=True)
@@ -877,21 +893,22 @@ if __name__ == "__main__":
     ap.add_argument("--run", default="run1")
     ap.add_argument("--max-passes", type=int, default=80)
     ap.add_argument("--lag", type=int, default=8)
-    ap.add_argument("--lrate", type=float, default=1e-3)
+    ap.add_argument("--lrate", type=float, help="learning rate to start at (default: train 0.001, pool 0.0003)")
     ap.add_argument("--threads", type=int, default=6)
+    ap.add_argument("--batch", type=int, default=8, help="pool: lines per training step")
     ap.add_argument("--limit", type=int, help="use only the first N training lines (quick trials)")
     ap.add_argument("--no-augment", action="store_true")
     ap.add_argument("--no-contributions", action="store_true", help="pool: leave out the lines contributed from Manuscribe")
     ap.add_argument("--seg", default="seg", help="train/test: lines from Kraken's segmentation (seg) or the U-Net's (seg_torch)")
     a = ap.parse_args()
     if a.command == "pool":
-        pool(a.run, a.base, a.passes, per_pass=a.per_pass, holdout=a.holdout, ms_ids=a.ms_id or None, exclude=a.exclude,
-             threads=a.threads, lag=a.lag, contributions=not a.no_contributions, seg=a.seg)
+        pool(a.run, a.base, a.passes, lrate=a.lrate or 3e-4, per_pass=a.per_pass, holdout=a.holdout, ms_ids=a.ms_id or None, exclude=a.exclude,
+             threads=a.threads, lag=a.lag, batch=a.batch, contributions=not a.no_contributions, seg=a.seg)
         raise SystemExit
     if len(a.ms_id) != 1:
         ap.error(f"{a.command} takes exactly one manuscript")
     if a.command == "train":
-        train(a.ms_id[0], a.run, a.max_passes, a.lag, a.lrate, threads=a.threads, limit=a.limit, augment_on=not a.no_augment, seg=a.seg)
+        train(a.ms_id[0], a.run, a.max_passes, a.lag, a.lrate or 1e-3, threads=a.threads, limit=a.limit, augment_on=not a.no_augment, seg=a.seg)
     elif a.command == "finetune":
         finetune(a.ms_id[0], a.base, a.run, a.passes, holdout=a.holdout, threads=a.threads, seg=a.seg)
     elif a.command == "recut":
