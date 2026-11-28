@@ -122,15 +122,18 @@ def iast_to_slp(s):
 
 
 def lexica_lines(folder=LEXICA):
-    """the lexica texts (IAST, one work a file) as Devanagari sentences of letters only, spaces removed -> (lines, files)"""
+    """the lexica texts (IAST, one work a file) as Devanagari sentences of letters only, spaces removed -> (lines, files)
+
+    Each word is transliterated on its own and the words joined afterwards, in SLP1, where every letter is one
+    character: 'hāra iti' gives हारइति, as a manuscript writes it, and 'vāg iti' gives वागिति. Taking the spaces out of
+    the IAST first made the vowels of a hiatus one of IAST's two-letter vowels ('hāraiti': हारैति; 'sa uvāca': सौवाच), so
+    that until 28 November 2026 the model never saw a word in -a before one in i- or u- (हारइति read as हारिति)."""
     lines, files = [], []
     for p in sorted(Path(folder).glob("*.txt")):
         files.append(p.name)
         text = p.read_text(encoding="utf-8").lower()
         for run in re.split(r"[^" + re.escape(_LETTERS) + r" ]+", text):
-            slp = iast_to_slp(run.replace(" ", ""))
-            if slp is None:
-                slp = "".join(w for w in (iast_to_slp(w) for w in run.split()) if w)
+            slp = "".join(w for w in (iast_to_slp(w) for w in run.split()) if w)
             t = slp_to_deva(slp)
             if len(t) >= 4:
                 lines.append(t)
